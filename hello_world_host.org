@@ -1,0 +1,23 @@
+*  Hello World Host
+*** Load and initially parse `guest.polkavm`
+```rust
+    // first including the bytes of the file
+    let raw_blob = include_bytes!("guest.polkavm");
+
+    // ane then create a `ProgramBlob` from those bytes
+    let blob = ProgramBlob::parse(&raw_blob[..]).unwrap();
+```
+
+ProgramBlob and `parse` are explained in [[polkavm_notes.org]]
+
+*** Init other structures
+Default initializations of  Config, Engine, Module and the Linker, everything explained in [[polkavm_notes.org]]
+
+Module -> it contains the polkavm program
+Linker -> will be used to insert host functions
+
+*** Setup of the Linker
+
+using `func_wrap` a new host function is added to the linker and the `instantiate_pre` create a InstancePre that will be then instantiated, this final instatination will be used to extract the function that we want to call and call direclty into those.
+
+how? `get_typed_func` and then `call`

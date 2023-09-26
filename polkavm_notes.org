@@ -1,0 +1,317 @@
+* Polkavm
+** ProgramBlob
+
+A partially deserialized PolkaVM program, composed by:
+```rust
+pub struct ProgramBlob<'a> {
+    blob: CowBytes<'a>,
+
+    bss_size: u32,
+    stack_size: u32,
+
+    ro_data: Range<usize>,
+    rw_data: Range<usize>,
+    exports: Range<usize>,
+    imports: Range<usize>,
+    code: Range<usize>,
+
+    debug_strings: Range<usize>,
+    debug_function_ranges: Range<usize>,
+    debug_function_info: Range<usize>,
+}
+```
+CawBytes is just a wrapper over a Cow<'a, u8>
+
+*** parse function
+
+1. Make sure the bytes blob starts with BLOB_MAGIC
+   ```sh
+    pub const BLOB_MAGIC: [u8; 4] = [b'P', b'V', b'M', b'\0'];
+   ```
+2. Init the Reader
+3. read a byte to extract the BlobVersion
+   if different from BLOB_VERSION_V1 return Err
+4. read another byte the extract the SECTION
+   1. If the section is SECTION_MEMORY_CONFIG then the parser will expect right after
+      + section_length
+      + bss_size
+      + stack_size
+   2. check that the section_length described correctly the encoding of bss_size and stack_size
+   3. read another byte to extract the new section
+5. All the other sections are now read and the ProgramBlob is filled up with all the ranges that compose the polkavm executable
+
+   and the orther of the sections is:
+   1. SECTION_RO_DATA
+   2. SECTION_RW_DATA
+   3. SECTION_IMPORTS
+   4. SECTION_EXPORTS
+   5. SECTION_CODE
+   6. SECTION_OPT_DEBUG_STRINGS
+   7. SECTION_OPT_DEBUG_FUNCTION_INFO
+   8. SECTION_OPT_DEBUG_FUNCTION_RANGES
+
+   then there are some optional sections ans last the SECTION_END_OF_FILE (just 0)
+*** imports
+
++ Stucture
+
+| what              | size                    |
+| number of imports | varint                  |
+| fn_protoype       | fn_protoype * n_imports |
+
+Imports are things imported from the blob, can be seen as "Host Function"
+
+#+BEGIN_SRC rust
+pub fn imports(&'_ self) -> impl IteratorrItem = Result<ProgramImport, ProgramParseError>> + Clone + '_ {
+#+END_SRC
+
+where `ProgramParseError` is just a Wrapper over `enum ProgramParseErrorKind` (TODO: WHY?) and:
+#+BEGIN_SRC rust
+pub struct ProgramImport<'a> {
+    /* SUPPOSITION: (TODO: make sure is true)
+       this is the index of the function inside the import section
+    ,**/
+    index: u32, (TODO: WHAT IS THAT?)
+    /* SUPPOSITION: (TODO: make sure is true)
+       Descriptor of the import, it contains: name, arg_count, args and return type
+    ,**/
+    prototype: ExternFnPrototype<'a>,
+}
+#+END_SRC
+
+
+INTERESTING: the iterator is implemented in the function itself
+
+(TODO: The logic of the iterator is not straight forward)
+
+#+BEGIN_SRC rust
+enum State {
+    Uninitialized,
+    Pending(u32),
+    Finished,
+}
+
+struct ImportIterator<'a> {
+    state: State,
+    reader: Reader<'a>,
+}
+
+impl<'a> ImportIterator<'a> {
+    fn read_next(&mut self) -> Result<Option<ProgramImport<'a>>, ProgramParseError> {
+        // THIS TRICK OF USING REPLACE TO MAKE THE CODE BETTER THE FOLLOWING CODE IS INCREDIBLE
+        let remaining = match core::mem::replace(&mut self.state, State::Finished) {
+            ...
+    }
+}
+
+impl<'a> Iterator for ImportIterator<'a> { ... }
+#+END_SRC
+
+The function return an ImportIterator object and initially it is:
+
+#+begin_src  rust
+ImportIterator {
+    state: if self.imports != (0_usize..0_usize) {
+        // if there are imports then the iterator is Uninitialized
+        State::Uninitialized
+    } else {
+        // if the range is EMPTY then the iterator is finished
+        State::Finished
+    },
+    // just return a Reader object over a precise section
+    reader: self.get_section_reader(self.imports.clone()),
+}
+#+end_src
+
+** ExternTy
+Just an enum over all the possible types that the blob can provide to the imports, currently
+
+#+begin_src rust
+pub enum ExternTy {
+    I32 = 1,
+    I64 = 2,
+}
+#+end_src
+
+*** try_deserialize(value)
+really straight forward
+1 -> `I32`
+1 -> `I64`
+
+** Reader
+```rust
+struct Reader<'a> {
+    blob: &'a [u8],
+    position: usize,
+    previous_position: usize,
+}
+```
+*** read_byte
+This function should easily read the next byte BUT it does in a weird way,
+calling `read_slice_as_range`
+
+*** read_slice_as_range (count)
+range = range (current_position, current_position + count)
+
+Just make sure that is inside the blob, update position and prev_position and finally return the range.
+
+PAY ATTENTION: this function is used in `read_section_range_into` because it makes sure the range make sense and update the position of the reader
+
+*** read_varint
+Read the next bytes as an Integer that follows a Variable Length Encoding
+Only at most 32-bit values are supported.
+
+TODO: understand this encoding and why is here, is it present in ELF file also? or just optimization by @koute
+
+*** read_section_range_into (&mut out_section, &mut out_range, expected_section)
+out_section is the code of the next section (readed by the caller of this function)
+
+if out_section differs from expected_section then the function returns `Ok(())` immediately
+otherwise:
+1. read the section length (varint encoded)
+2. Use read_slice_as_range to make sure the section length is correct
+   ```rust
+   *out_range = self.read_slice_as_range(section_length)?;
+   ````
+3. read the byte just after the ended section to update out_section with the new section code
+*** read_extern_fn_prototype
+
+Structure of a fn_prototype:
+
+| what               | size                      |
+|--------------------+---------------------------|
+| length of the name | varint                    |
+| name               | dependent of the previous |
+| arg_count          | varint                    |
+| args               | byte * arg_count          |
+| return_ty          | byte                      |
+
+1. read the name of the fn_prototype using read_string_with_length
+2. next varint is the
+3. make sure the specified arg_count is not more then `crate::abi::VM_MAXIMUM_EXTERN_ARG_COUNT`
+4. allocate the space for the arguments types
+    -> (TODO) why ` = [None; crate::abi::VM_MAXIMUM_EXTERN_ARG_COUNT]` ? why use always the max argumentes?
+              just to make it easier? it's only 6 enums so nothing so bad at runtime
+5. loop over the expected arguments
+   1. each argument is deserialized to extract the type -> `ExternTy::try_deserialize`
+   2. `args[nth_arg as usize] = Some(ty);` and then inserted into the just allocated args
+6. the return type is then decoded, it could be 0 -> None or another ExternTy that needs to be deserialized
+7. TADAAANN the fn_prototype is decoded
+
+*** read_string_with_length
+#+BEGIN_SRC rust
+// decode the length of the string (varint encoded)
+let length = self.read_varint()?;
+// get the range fo the string making sure it does not overflow
+let range = self.read_slice_as_range(length)?;
+// just extract a slice from it
+let slice = &self.blob[range];
+// decode the slice as utf8 string
+core::str::from_utf8(slice)
+    .ok()
+    .ok_or(ProgramParseError(ProgramParseErrorKind::FailedToReadStringNonUtf {
+        offset: self.previous_position,
+    }))
+#+END_SRC
+
+
+** Config
+#+BEGIN_SRC rust
+pub struct Config {
+    pub(crate) backend: Option<Backend>,
+    pub(crate) trace_execution: bool,
+    pub(crate) allow_insecure: bool,
+}
+#+END_SRC
+
+Just a wrapper over some information of the execution type
++ backend :: could be Compiler or Interpreter while
++ trace_execution :: (TODO) I think just a way to keep track of the function stack and other stuff
++ allow_insecure :: (TODO)
+
+
+** Engine
+
+#+BEGIN_SRC rust
+pub struct Engine {
+    config: Config,
+}
+#+END_SRC
+
+Just a wrapper over the Config
+
+*** new(&Config)
+It just create the Engine structure making sure that the backend is supported, Interpreter is always true while Compiler return a constant that currently is true (maybe this will be under some sort of cfg based on the architecture the machine is running on? because currently risc-v is NOT compiled to arm but only x86_64)
+
+Plus it does this check
+#+BEGIN_SRC rust
+#[allow(clippy::collapsible_if)]
+if !config.allow_insecure {
+    if config.trace_execution {
+        bail!("cannot enable trace execution: `set_allow_insecure`/`POLKAVM_ALLOW_INSECURE` is not enabled");
+    }
+}
+#+END_SRC
+trace seems to be enabled only and only if also allow_insecure is true
+
+Why that usage of clippy? I'm not sure but it could be just a way to let the code on our side more elastic and easy to modify if other cases will be added, while clippy can neast the ifs
+
+
+** Module
+#+BEGIN_SRC rust
+/// A compiled PolkaVM program module.
+pub struct Module(Arc<ModulePrivate>);
+#+END_SRC
+
+*** from_blob(engine: &Engine, blob: &ProgramBlob)
+Creates a new module from a deserialized program `blob`
+
+1. Iterate over the imports
+
+
+** Linker
+
+#+BEGIN_SRC rust
+pub struct Linker<T> {
+    host_functions: HashMap<String, ExternFnArc<T>>,
+    #[allow(clippy::type_complexity)]
+    fallback_handler: Option<FallbackHandlerArc<T>>,
+    phantom: core::marker::PhantomData<T>,
+}
+#+END_SRC
+
+T = seems could be a shared state that can be used in the different host functions
+
+*** new(_engine: &Engine)
+default values are used, engine is NOT used and T = ()
+
+*** func_wrap<Params, Args>(&mut self, name: &str, func: impl IntoExternFn<T, Params, Args>)
+
+a way to register host functions
+
+*** instantiate_pre(&self, module: &Module)
+Link exports value of the module to registered host functions in the Linker
+
+Return type: InstancePre
+
+**** How it works? (TODO)
+
+
+
+** InstancePre
+#+BEGIN_SRC rust
+pub struct InstancePre<T>(Arc<InstancePrePrivate<T>>);
+#+END_SRC
+
+It is just a pre stage of a real instance
+
+*** instantiate
+the pre instance can be instantiated in two ways Compiled or Interpreted with the Tracing enabled
+
+**** How it works? (TODO)
+
+*** get_typed_func<FnArgs, FnResult>(&self, name: &str)
+Returns a **typed** handle to a function of a given name exported by the module.
+
+*** get_func(&self, name: &str)
+Returns a handle to a function of a given name exported by the module.

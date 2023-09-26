@@ -1,0 +1,148 @@
+* How Tests are managed?
+
+Inside the Folder `ci/jobs` there a several files that are executed in the following order (on a linux distribution) by the file `ci/run-all-tests.sh`
+
+` set -euo pipefail` <- present in all the .sh files, not sure what it does
+
+What else `run-all-tests` does is to set to 1 the env variable CI_RV32E_TOOLCHAIN_AVAILABLE if the rv32e is an available in the `rustup toolchain list`
+
+1. ./ci/jobs/build-guests.sh
+2. ./ci/jobs/build-and-test.sh
+3. (only if on linux) ./ci/jobs/build-and-test-linux.sh
+4. ./ci/jobs/clippy.sh
+5. ./ci/jobs/rustfmt.sh
+
+** build-guests
+Just call `build_all.sh` inside `example/guests`
+
+*** build_all
+This file seems to be prepared to support multiple tests but for now it just build 'hello-world'
+
+**** Compiling
+the folder `example/guests` is a separate workspace to (i think) include all the programs that will be compiled and the tested into the polkavm, the workspace has some interesting features:
+
+Inside Cargo.toml
+
++ [profile.release]
+  + lto = "fat"  ->
+    lto -> The lto setting controls the -C lto flag which controls LLVM’s link time optimizations.
+    fat -> Performs “fat” LTO which attempts to perform optimizations across all crates within the dependency graph.
+  + panic = "abort"
+    panic -> The panic setting controls the -C panic flag which controls which panic strategy to use.
+    abort -> Terminate the process upon panic. (the other option is unwind)
+  + opt-level = 3
+    opt-level -> The opt-level setting controls the -C opt-level flag which controls the level of optimization. Higher optimization levels may produce faster runtime code at the expense of longer compiler times
+    3 -> all optimizations
+  + codegen-units = 1
+    codegen-units -> The codegen-units setting controls the -C codegen-units flag which controls how many “code generation units” a crate will be split into
+    1 -> a single codegen-unit will be produce (default is 256 (used to enable incremental builds))
+  + debug = true
+    Just add debugging symbols
+
++ [workspace]
+
+  + resolver = "2"
+    this enable cargo to use a feature resolver that let create things like:
+
+    ```toml
+    [dependencies.common]
+    version = "1.0"
+    features = ["f1"]
+
+    [target.'cfg(windows)'.dependencies.common]
+    version = "1.0"
+    features = ["f2"]
+    ```
+
+    where the feature f2 will NOT be added to not windows platform
+
+    An example of usage in the project is in the `crates/polkavm/Cargo.toml` where the polkavm-linux-sandbox is added as dependency only on linux with x86_64 as target :
+
+    ```
+    [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
+    polkavm-linux-sandbox = { workspace = true }
+    ```
+
+    + What workspace = true does?
+      Dependencies can be inherited from a workspace by specifying the dependency in the workspace’s [workspace.dependencies] table. After that, add it to the [dependencies] table with workspace = true.
+
+Inside .cargo/config.toml
+
++ [build]
+  + target = "riscv32em-unknown-none-elf"
+    Just specify the compilation target
+  + rustflags = [
+        "-C", "relocation-model=pie",
+        "-C", "link-arg=--emit-relocs",
+        "-C", "link-arg=-T.cargo/memory.ld",
+    ]
+
+    those are custom flags to pass to all compiler invocations
+    + relocation-model -> This option controls generation of position-independent code (PIC).
+      pie -> position independent executable
+
+    + link-arg -> This flag lets you append a single extra argument to the linker invocation.
+      --emit-relocs -> (instructs linker to preserve relocation sections) why and what???
+      -T.cargo/memory.ld -> Specify the linker scripts file to be used by the linker (file not comprehensible for now)
+
+Inside rust-toolchain.toml
+
++ [toolchain]
+  channel = "rv32e-nightly-2023-04-05-x86_64-unknown-linux-gnu"
+
+  this file is just used to set up a custom toolchain that the rustc will use
+
+The output of the compiling process is a file into: examples/guests/target/riscv32em-unknown-none-elf/release/hello-world-guest
+**** Linking
+
+The just compiled program is a contained executable that follows (I'm not 100% sure) an ELF structure, this file is 're-linked' against 'polkatool' to produce a simple executable container.
+
+***** How?
+Polkatool just accepts a bunch of command line arguments and does two things
++ link (what is used in the build scripts)
+  it just set up the `polkavm_linker::Config` and then call call `polkavm_linker::program_from_elf`
+
++ disassemble (TODO)
+
+At the end there will be a new file called `examples/hosts/hello-world/src/guest.polkavm`
+
+**** End
+Just printing the full path of the new .polkavm program and its size.
+
+
+** build-and-test
+
+it runs in the main folder
+
+```sh
+cargo test --all
+cargo test --all --release
+```
+
+to tests all the projects and then:
+
+```sh
+POLKAVM_TRACE_EXECUTION=1 POLKAVM_ALLOW_INSECURE=1 cargo run -p hello-world-host
+```
+
+*** cargo run -p hello-world-host
+
+explained in [[hello_world_host.org]]
+
+
+** build-and-test-linux
+
+Firstly
+```sh
+cd crates/polkavm-zygote
+cargo build --release
+```
++ What is zygote? (TODO)
+
+and then
+```sh
+POLKAVM_TRACE_EXECUTION=1 POLKAVM_ALLOW_INSECURE=1 cargo run --target=i686-unknown-linux-musl -p hello-world-host
+```
+
++ why change target to i686-unknown-linux-musl? (TODO)
+
