@@ -122,6 +122,13 @@ ImportIterator {
     reader: self.get_section_reader(self.imports.clone()),
 }
 #+end_src
+*** instructions
++ structure
+| what | size |
+|      |      |
+
+TODO
+
 
 ** ExternTy
 Just an enum over all the possible types that the blob can provide to the imports, currently
@@ -266,7 +273,27 @@ pub struct Module(Arc<ModulePrivate>);
 *** from_blob(engine: &Engine, blob: &ProgramBlob)
 Creates a new module from a deserialized program `blob`
 
-1. Iterate over the imports
+1. Parsing imports
+   1. iterate over the imports, we now know which imports the blob expects
+   2. fill `BTreeMap<u32, ProgramImport>` (TODO: why the index is present as key and ALSO in the value?)
+   3. + checks over the max number of imports allowed
+2. Parsing Code
+   1. Init `jump_target_to_instruction: HashMap<u32, u32>` and `instructions: Vec<RawInstruction>`
+
+      (TODO: `jump_target_to_instruction` is not so clear for not to me, why the key is the target and the value is the instruction that jumps to the target?)
+
+   2. Iterate over instructions
+      There is a match over the Opcode of the instruciton
+      + Opcode::jump_target
+         (TODO: insted of `instruction.raw_imm_or_reg()` a second time could be used `target`)
+         the jump targets are added to the map `jump_target_to_instruction`
+      + Opcode::ecalli
+         (TODO: are this opcode someting like syscall in x86_64?)
+         there is a check that the value associated to `instruction.raw_imm_or_reg()` is PRESENT in the imports map, otherwhise it fails
+   3. instructions are addded in the vec `instructions`
+   4. and VM_MAXIMUM_INSTRUCTION_COUNT is checked
+
+
 
 
 ** Linker
