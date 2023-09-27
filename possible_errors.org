@@ -1,0 +1,38 @@
+* Possible Error:
+** crates/polkavm-common/src/abi.rs
+line 94
+
+#+begin_src rust
+// We already checked that these are less than the maximum memory size, so these cannot fail
+// because the maximum memory size is going to be vastly smaller than what an u64 can hold.
+const _: () = {
+    assert!(VM_MAXIMUM_MEMORY_SIZE as u64 + VM_PAGE_SIZE as u64 <= u32::MAX as u64);
+};
+#+end_src
+
+smaller than what an u64 can hold. -> smaller than what an **u32** can hold.
+
+** crates/polkavm/src/api.rs
+line 222
+
+
+#+begin_src rust
+GuestMemoryConfig::new(
+    blob.ro_data().len() as u64,
+    blob.rw_data().len() as u64,
+    blob.bss_size() as u64,
+    blob.stack_size() as u64,
+)
+.map_err(Error::from_static_str)?;
+#+end_src
+
+can be substitute with:
+#+begin_src rust
+let init = GuestProgramInit::new() // <--- this is done anyway
+    .with_ro_data(blob.ro_data())
+    .with_rw_data(blob.rw_data())
+    .with_bss(blob.bss_size())
+    .with_stack(blob.stack_size());
+
+init.memory_config()?; // <-----
+#+end_src

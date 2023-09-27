@@ -53,11 +53,11 @@ CawBytes is just a wrapper over a Cow<'a, u8>
    then there are some optional sections ans last the SECTION_END_OF_FILE (just 0)
 *** imports
 
-+ Stucture
-
-| what              | size                    |
-| number of imports | varint                  |
-| fn_protoype       | fn_protoype * n_imports |
++ Structure
+| what              | size                                                                                      |
+| number of imports | varint                                                                                    |
+| index             | before each function there is a varint encoding the index of the following fn * n_imports |
+| fn_protoype       | fn_protoype * n_imports                                                                   |
 
 Imports are things imported from the blob, can be seen as "Host Function"
 
@@ -153,9 +153,27 @@ CodeIterator {
 #+end_src
 
 NOW to iterate over instructions the `next` method is called and the iterator works in this way:
-1. the return type of the iteration is `RawInstruction`
-2. TODO
+1. the return type of the iteration is `Result<RawInstruction, ProgramParseError>`
+2. `let slice = &self.code[self.position..];`
+   1. if empty return None
+3. Deserialize the slice getting out an instruction and its length
+   1. if the instruction is deserialized correctly then the position in the slice is updated and returned the instruction
+4. if there is a problem in the deserialization the error is reported with the offset where the instruciton is not correct
+*** exports
+Equal to the function import, the only different is that the return type of the iterator is `ProgramImport<'a>`
 
+#+begin_src rust
+pub struct ProgramExport<'a> {
+    address: u32, // this is the address of the function in the code
+    prototype: ExternFnPrototype<'a>,
+}
+#+end_src
+
++ And the Structure change a bit
+| what              | size                                                                                      |
+| number of exports | varint                                                                                    |
+| index             | before each function there is a varint encoding the index of the following fn * n_exports |
+| fn_protoype       | fn_protoype * n_exports                                                                   |
 
 ** ExternTy
 Just an enum over all the possible types that the blob can provide to the imports, currently
@@ -296,6 +314,20 @@ Why that usage of clippy? I'm not sure but it could be just a way to let the cod
 #+BEGIN_SRC rust
 /// A compiled PolkaVM program module.
 pub struct Module(Arc<ModulePrivate>);
+
+struct ModulePrivate {
+    debug_trace_execution: bool,
+    exports: Vec<ProgramExport<'static>>,
+    imports: BTreeMap<u32, ProgramImport<'static>>,
+    export_index_by_name: HashMap<String, usize>,
+    instructions: Vec<RawInstruction>,
+    jump_target_to_instruction: HashMap<u32, u32>, // (TODO: still BOH)
+
+    blob: Option<ProgramBlob<'static>>,
+    // AS WE CAN SEE -> in a module are accepted both a compiled and interpreted module
+    compiled_module: Option<CompiledModule>,
+    interpreted_module: Option<InterpretedModule>,
+}
 #+END_SRC
 
 *** from_blob(engine: &Engine, blob: &ProgramBlob)
@@ -310,19 +342,141 @@ Creates a new module from a deserialized program `blob`
 
       (TODO: `jump_target_to_instruction` is not so clear for not to me, why the key is the target and the value is the instruction that jumps to the target?)
 
-   2. Iterate over instructions
+   2. Iterate over instructions (using the `ProgramBlob::instructions` method)
       There is a match over the Opcode of the instruciton
       + Opcode::jump_target
-         (TODO: insted of `instruction.raw_imm_or_reg()` a second time could be used `target`)
+         (TODO: instead of `instruction.raw_imm_or_reg()` a second time could be used `target`)
          the jump targets are added to the map `jump_target_to_instruction`
+         BUT there if the key (target) is duplicated into the map then it is an ERROR (TODO: WHY??) <------------ why two different instructions can't jump on the same target???
       + Opcode::ecalli
-         (TODO: are this opcode someting like syscall in x86_64?)
+         (TODO: are this opcode something like syscall in x86_64?)
          there is a check that the value associated to `instruction.raw_imm_or_reg()` is PRESENT in the imports map, otherwhise it fails
    3. instructions are addded in the vec `instructions`
    4. and VM_MAXIMUM_INSTRUCTION_COUNT is checked
+3. Parsing exports
+   1. iterate over the exports
+   2. check that the `export.address` point to a jump target instruction (TODO: WHY???) <-------- AAKJHDLAKJHDLKADKJAHDlkjh
+   3. check the max number of exports (VM_MAXIMUM_EXPORT_COUNT)
+4. Parsing is now finished
+5. early check on the memory config validity
+   #+begin_src rust
+   GuestMemoryConfig::new(
+       blob.ro_data().len() as u64,
+       blob.rw_data().len() as u64,
+       blob.bss_size() as u64,
+       blob.stack_size() as u64,
+   )
+   .map_err(Error::from_static_str)?;
+   #+end_src
+
+   This method does some checks
+   + each size is less then VM_MAXIMUM_MEMORY_SIZE (readable memory size)
+   + This weird thing: (TODO: not 100% sure why this is not done)
+     #+begin_src rust
+     // We already checked that these are less than the maximum memory size, so these cannot fail
+     // because the maximum memory size is going to be vastly smaller than what an u64 can hold.
+     const _: () = {
+         assert!(VM_MAXIMUM_MEMORY_SIZE as u64 + VM_PAGE_SIZE as u64 <= u32::MAX as u64);
+     };
+     #+end_src
+   + each value is aligned to the VM_PAGE_SIZE
+   + the sum of all the things must be less then VM_MAXIMUM_MEMORY_SIZE
+6. Init the Guest Program
+    #+begin_src rust
+    let init = GuestProgramInit::new()
+        .with_ro_data(blob.ro_data())
+        .with_rw_data(blob.rw_data())
+        .with_bss(blob.bss_size())
+        .with_stack(blob.stack_size());
+    #+end_src
+
+    `GuestProgramInit` is just a wrapper over the inserted "sections" (are them sections?)
+7. NOW WEIRD THINGS ON THE BACKEND TYPE
+   1. define `default_backend`, compiler backend seems to be always supported for now (there is a const = true)
+   2. the selected backend is the one specified in the Engine, if not the fallback is the `default_backend`
+   3. Two Module are create
+      1. `CompiledModule` -> if compiler_backend is selected (TODO)
+      2. `InterpretedModule` -> if compiler_backend is selected OR trace_execution is enabled (TODO)
+8. creation of `export_index_by_name`
+9. exports and import are 're-collected', I think to change the lifetimes
+10. At the end the creation of the Module
+    the blob is inserted in the module ONLY if debug_trace_execution is activated
 
 
+** CompiledModule
 
+#+begin_src rust
+pub struct CompiledModule {
+    sandbox_program: SandboxProgram,
+    export_trampolines: Vec<u64>,
+}
+#+end_src
+
+*** new
+
+1. `Compiler::new(instructions, exports, debug_trace_execution)`
+
+** Compiler
+
+#+begin_src rust
+struct Compiler<'a> {
+    asm: Assembler,
+    exports: &'a [ProgramExport<'a>],
+    instructions: &'a [RawInstruction],
+    pc_to_label: HashMap<u32, Label>,
+    pc_to_label_pending: HashMap<u32, Label>,
+    next_instruction: Option<RawInstruction>,
+    max_jump_target: u32,
+    jump_table: Vec<u8>,
+    export_to_label: HashMap<u32, Label>,
+    export_trampolines: Vec<u64>,
+    debug_trace_execution: bool,
+    ecall_label: Label,
+    trap_label: Label,
+    trace_label: Label,
+
+    /// Whether we're compiling a 64-bit program. Currently totally broken and mostly unimplemented.
+    // TODO: Fix this.
+    regs_are_64bit: bool,
+}
+#+end_src
+
+
+*** new
+1. creation of the `Assembler` -> initially empty
+   #+begin_src rust
+   pub struct Assembler {
+       origin: u64, // WHAT?! (TODO)
+       code: Vec<u8>,
+       labels: Vec<usize>,
+       fixups: Vec<Fixup>,
+   }
+   #+end_src
+2. and then those BOH things:
+   #+begin_src rust
+   let ecall_label = asm.forward_declare_label();
+   let trap_label = asm.forward_declare_label();
+   let trace_label = asm.forward_declare_label();
+   #+end_src
+
+   `forward_declare_label` :: this method just create a `Label` whith `usize::MAX` (a label is a transparent wrapper to usize)
+3. and then just construct the `Compiler` object
+
+*** finalize
+
+we are arrived to the ciccia now! (a little bit of italian, sorry)
+
+return type of the function:
+#+begin_src rust
+struct CompilationResult<'a> {
+    code: &'a [u8],
+    jump_table: &'a [u8],
+    export_trampolines: &'a [u64],
+    sysreturn_address: u64,
+}
+#+end_src
+
+1. TODO !!
 
 ** Linker
 
