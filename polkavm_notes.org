@@ -122,12 +122,39 @@ ImportIterator {
     reader: self.get_section_reader(self.imports.clone()),
 }
 #+end_src
+
 *** instructions
+
 + structure
 | what | size |
 |      |      |
 
-TODO
+A struct is defined to iterate over the instructions
+
+#+begin_src rust
+struct CodeIterator<'a> {
+    code_section_position: usize,
+    position: usize,
+    code: &'a [u8],
+}
+#+end_src
+
+and the first instantiation of this struct is:
+#+begin_src rust
+CodeIterator {
+    // lower bound of the range, starting point of the code sections
+    code_section_position: self.code.start,
+    // beginning of the section
+    position: 0,
+    // this method return the code section in a raw format (&[u8])
+    // it just extrapolate from the blob the code range
+    code: self.code(),
+}
+#+end_src
+
+NOW to iterate over instructions the `next` method is called and the iterator works in this way:
+1. the return type of the iteration is `RawInstruction`
+2. TODO
 
 
 ** ExternTy
@@ -144,6 +171,7 @@ pub enum ExternTy {
 really straight forward
 1 -> `I32`
 1 -> `I64`
+
 
 ** Reader
 ```rust
@@ -342,3 +370,220 @@ Returns a **typed** handle to a function of a given name exported by the module.
 
 *** get_func(&self, name: &str)
 Returns a handle to a function of a given name exported by the module.
+
+
+** RawInstruction
+
+#+begin_src rust
+ pub struct RawInstruction {
+     //ok, just the opcode of the instruction
+     //it could be seen as the "identifier" of the instruction in the binary format
+     op: u8,
+     // maybe the register used in the instruction? (TODO)
+     regs: u8,
+     // LOL IDK (TODO)
+     imm_or_reg: u32,
+ }
+#+end_src
+
+There seem to be only 4 types of opcodes:
+- name_argless :: (&mut self), no input args
+- name_with_imm :: (&mut self, imm: u32), only one arg
+- name_with_regs3 :: (&mut self, reg1: Reg, reg2: Reg, reg3: Reg), three registers as input
+- name_with_regs2_imm :: (&mut self, reg1: Reg, reg2: Reg, imm: u32), 2 registers and imm input
+
+How instructions are defined?
++ `define_opcodes!` accept the opcodes and its binary values,
+  the opcodes are divided as before
++ the macro define a trait `InstructionVisitor` that requires to self to implement a method for each instruction
+  + this trait is implemented by `core::fmt::Formatter`
++ then the method `visit` is implemented for `RawInstruction`
+  + What it does is to accept `impl InstructionVisitor` and match on the Opcode to call the proper method on the `impl InstructionVisitor`, the only struct to implement this trait is `core::fmt::formatter` -> this let me think how this method is used to just 'debug' instructions in fact:
+    #+begin_src rust
+    impl core::fmt::Display for RawInstruction {
+        fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+            self.visit(fmt)
+        }
+    }
+    #+end_src
+    visit is just used in the `Display` method
++ After the things with the `InstructionVisitor` trait there is another call to the `define_opcodes!` macro, but another branch:
+  #+begin_src rust
+  define_opcodes!(
+      @impl_shared
+      $($name_argless = $value_argless,)+
+      $($name_with_imm = $value_with_imm,)+
+      $($name_with_regs3 = $value_with_regs3,)+
+      $($name_with_regs2_imm = $value_with_regs2_imm,)+
+  );
+  #+end_src
+  as we can see the division between the different instructions is removed, the marco indeed accept only a list of `name = value`
+  #+begin_src rust
+    (@impl_shared $($name:ident = $value:expr,)+) => { ... }
+  #+end_src
+  + What this branch does?
+    #+begin_src rust
+    // It define an enum to represent all the opcodes
+
+    #[repr(u8)] // in a fieldless enum what this does is to treat
+                // at runtime the enum literally like an u8, so the value
+                // is associated to each variant
+                // more infos: https://doc.rust-lang.org/nomicon/other-reprs.html#repru-repri
+    // + other derive
+    pub enum Opcode {
+        $(
+            $name = $value,
+        )+
+    }
+
+    // Implementation of a method able to convert a byte to an opcode
+    impl Opcode {
+        pub fn from_u8(byte: u8) -> Option<Opcode> {
+            match byte {
+                $($value => Some(Opcode::$name),)+
+                _ => None
+            }
+        }
+    }
+
+    // and then construct a 256 value slice to store which opcodes are valid
+    const IS_INSTRUCTION_VALID_CONST: [bool; 256] = {
+        let mut is_valid = [false; 256];
+        $(
+            is_valid[$value] = true;
+        )+
+        is_valid
+    };
+    #+end_src
+
+**What are though `regs` and `imm_or_reg`???**
+
+useful things to know:
++ `Reg` enum :: there are 14 variants (so 14 registers?)
++ ALL_NON_ZERO :: is a const array containing the list of all of the VM's registers, except the zero register.
++ ARG_REGS :: const array of all argument registers
++ MAX_INSTRUCTION_LENGTH :: it is the max length of a register, it is evaluated ad `MAX_VARINT_LENGTH + 2`, where `MAX_VARINT_LENGTH = 5`
+
+*** List of all instructions
+
+|---------------------------------------+-------------|
+| 1 byte instructions                   |             |
+| Instructions with no args.            |             |
+|---------------------------------------+-------------|
+| trap                                  | 0b00_000000 |
+|---------------------------------------+-------------|
+| 1-6 byte instructions                 |             |
+| Instructions with args: imm           |             |
+|---------------------------------------+-------------|
+| jump_target                           | 0b01_000000 |
+| ecalli                                | 0b01_111111 |
+|---------------------------------------+-------------|
+| 3 byte instructions                   |             |
+| Instructions with args: reg, reg, reg |             |
+|---------------------------------------+-------------|
+| set_less_than_unsigned                | 0b10_000000 |
+| set_less_than_signed                  | 0b10_000001 |
+| shift_logical_right                   | 0b10_000010 |
+| shift_arithmetic_right                | 0b10_000011 |
+| shift_logical_left                    | 0b10_000100 |
+| or                                    | 0b10_000101 |
+| and                                   | 0b10_000110 |
+| xor                                   | 0b10_000111 |
+| add                                   | 0b10_001000 |
+| sub                                   | 0b10_001001 |
+| mul                                   | 0b10_010000 |
+| mul_upper_signed_signed               | 0b10_010001 |
+| mul_upper_unsigned_unsigned           | 0b10_010010 |
+| mul_upper_signed_unsigned             | 0b10_010011 |
+| div_unsigned                          | 0b10_010100 |
+| div_signed                            | 0b10_010101 |
+| rem_unsigned                          | 0b10_010110 |
+| rem_signed                            | 0b10_010111 |
+|---------------------------------------+-------------|
+| 2-7 byte instructions                 |             |
+| Instructions with args: reg, reg, imm |             |
+|---------------------------------------+-------------|
+| set_less_than_unsigned_imm            | 0b11_000000 |
+| set_less_than_signed_imm              | 0b11_000001 |
+| shift_logical_right_imm               | 0b11_000010 |
+| shift_arithmetic_right_imm            | 0b11_000011 |
+| shift_logical_left_imm                | 0b11_000100 |
+| or_imm                                | 0b11_000101 |
+| and_imm                               | 0b11_000110 |
+| xor_imm                               | 0b11_000111 |
+| add_imm                               | 0b11_001000 |
+| store_u8                              | 0b11_010000 |
+| store_u16                             | 0b11_010010 |
+| store_u32                             | 0b11_010100 |
+| load_u8                               | 0b11_100000 |
+| load_i8                               | 0b11_100001 |
+| load_u16                              | 0b11_100010 |
+| load_i16                              | 0b11_100011 |
+| load_u32                              | 0b11_100100 |
+| branch_less_unsigned                  | 0b11_110000 |
+| branch_less_signed                    | 0b11_110001 |
+| branch_greater_or_equal_unsigned      | 0b11_110010   |
+| branch_greater_or_equal_signed        | 0b11_110011 |
+| branch_eq                             | 0b11_110100 |
+| branch_not_eq                         | 0b11_110101 |
+| jump_and_link_register                | 0b11_111111 |
+|---------------------------------------+-------------|
+
+**** Structure of an instruction
+***** 1֯ byte = opcode
+****** if opcode_msb = 0 and (opcode_msb - 1) = 0
+END, the instruction is 1B long
+****** else if opcode_msb = 0 and (opcode_msb - 1) = 1
+******* 2֯ to 6֯ byte = immediate
+the immediate value is varint encoded
+****** else if opcode_msb = 1 and (opcode_msb - 1) = 0
+******* 2֯ byte = reg2 & reg1
+******* 3֯ byte = reg3
+****** else if opcode_msb = 1 and (opcode_msb - 1) = 1
+******* 2֯ byte = reg2 & reg1
+******* 3֯ to 7֯ byte = immediate
+the immediate value is varint encoded
+
+*** new_argless(opcode)
+just a `RawInstruction` with no args, only the opcode
+*** new_with_imm(opcode, imm)
+*** new_with_regs3(opcode, reg1, reg2, reg3)
+*** new_with_regs2_imm(opcode, reg1, reg2, imm)
+*** op
+just return the enum Opcode
+*** reg1
+return an enum Reg, the reg1 is the lsh (least significant half) of `regs` -> `self.regs & 0b00001111`
+*** reg2
+return an enum Reg, the reg2 is the msh (most significant half) of `regs` -> `self.regs >> 4`
+*** reg3
+return an enum Reg, the reg3 is stored in `imm_or_reg`
+*** raw_op
+*** raw_imm_or_reg
+
+*** deserialize
+
+#+begin_src rust
+pub fn deserialize(input: &[u8]) -> Option<(usize, Self)> { ... }
+#+end_src
+
+The return type is a tuple, why?:
++ usize -> length of the encode instruction (bytes)
++ RawInstruction -> deserialized instruction
+
+What the function does?
+1. read the first byte to extract the opcode and make sure it is valid using the `IS_INSTRUCTION_VALID` array
+2. set the position to 1
+3. check the msb to see if REG1 and REG2 are present (second byte)
+   1. Check if the registers are valid, registers could be in the two halfs of the byte only values from 0 to 13, NOT 14 or 15
+4. check msb or (msb - 1)
+   1. the third thing could be REG3 (third byte) or an immediate value varint encoded (5B max)
+5. return the decoded instruciton and its encoded length
+
+*** serialize_into(buffer)
+1. make sure the buffer is enough big (MAX_INSTRUCTION_LENGTH)
+2. store the opcode in the position 0
+3. write regs in position 1 if the opcode expect registers
+4. write the imm_or_reg in position 1 or 2 if expected by the register
+
+*** TESTs
+(TODO: skipped for now)
