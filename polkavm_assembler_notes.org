@@ -1,0 +1,175 @@
+* polkavm_assembler
+** REX Prefix
+REX prefixes are instruction-prefix bytes used in 64-bit mode
+
+
+** Reg
+There is an enum representing all the register (one per variant)
+*** is_reg_preserved
+page 23 https://raw.githubusercontent.com/wiki/hjl-tools/x86-psABI/x86-64-psABI-1.0.pdf
+
+just divide preserved registers from which are not
+
+*** things about rex and modrm (TODO)
+*** impl_regs!
+this macro just implements 4 methods for each register, where each method returns the name of the corresponding 'sub-register' with the specified number of bits
+#+begin_src rust
+name(self) -> &'static str
+name32(self) -> &'static str
+name16(self) -> &'static str
+name8(self) -> &'static str
+#+end_src
+
+
+** Imm (TODO: ?)
+
+Immediate value???
+
+#+begin_src rust
+enum Imm {
+    Imm8(i8),
+    Imm32(i32),
+}
+
+impl Imm {
+    // This method let me think how Imm is just an abstraction of an Immediate
+    // value that can be inserted directly in the instruction
+
+    // it does not follow a varint encoding (as in risc-v) but simply it
+    // is inserted in memory following little endian (if I'm not stupid)
+    const fn append_into(self, enc: EncInst) -> EncInst {
+        match self {
+            Imm::Imm8(value) => enc.append(value as u8),
+            Imm::Imm32(value) => {
+                let xs = value.to_le_bytes();
+                enc.append_array([xs[0], xs[1], xs[2], xs[3]])
+
+                // why not?
+                enc.append_array(value.to_le_bytes());
+            }
+        }
+    }
+}
+#+end_src
+
+
+** Inst
+
+Structure representing x86 instructions
+#+begin_src rust
+struct Inst {
+    override_op_size: bool,
+    override_addr_size: bool,
+    op_alt: bool,
+    enable_modrm: bool,
+    rex: u8,
+    opcode: u8,
+    modrm: u8,
+    sib: u8,
+    imm: Option<Imm>,
+}
+#+end_src
+
+*** + multiple methods to construct valid instructions
+every function is `const` (lol)
+
+** mod inst
+How instructions are represented? (TODO)
+
+
+*** impl_inst!
+
+
+
+*** jmp_rel32 ???
+
+*** jmp_label32
+
+This SEEMS to be just an abstraction over the real x86 instructions (TODO)
+
+#+begin_src rust
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct jmp_label32(pub Label);
+impl jmp_label32 {
+    // implementation of a const function, used later to encode the instruction
+    const fn encode_const(self) -> EncInst {
+        // here there is a subsequest call to another const encoding instruction
+        jmp_rel32(0).encode_const() // (TODO: WTF is jmp_rel32? ehehhh... macro magic again!)
+    }
+}
+
+impl core::fmt::Display for jmp_label32 {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+        fmt.write_fmt(core::format_args!("jmp {}", self.0))
+    }
+}
+
+impl crate::Instruction for jmp_label32 {
+    // implemetation of the trait using const encoding
+    fn encode(self) -> EncInst {
+        self.encode_const()
+    }
+
+    // (TODO: BOH)
+    fn target_fixup(self) -> Option<(Label, u8, u8)> {
+        Some((self.0, 1, 4))
+    }
+}
+#+end_src
+
+
+** Assembler
+   #+begin_src rust
+   pub struct Assembler {
+       origin: u64, // WHAT?! (TODO)
+       code: Vec<u8>,  // Should be the container of the compiled code? (TODO)
+       labels: Vec<usize>, // BOH (TODO)
+       fixups: Vec<Fixup>, // BOH (TODO)
+   }
+   #+end_src
+*** forward_declare_label
+this method just create a `Label` with `usize::MAX` (a label is a transparent wrapper to usize)
+
+*** push(inst: impl Instruction)
+
+the trait `Instruction` is very simple, and it is present in the `polkavm_assembler` crate
+#+begin_src rust
+pub trait Instruction: Copy + core::fmt::Display {
+    fn encode(self) -> EncInst;
+    fn target_fixup(self) -> Option<(Label, u8, u8)>;
+}
+#+end_src
+
+1. get the encoded instruction
+2. `add_fixup_if_necessary` (TODO: WHAT?)
+3. extend the `code` vec with the just created slice
+
+
+** Label
+
+#+begin_src rust
+#[repr(transparent)]
+pub struct Label(usize);
+#+end_src
+
+
+** EncInst
+
+EncodedInstruction(?)
+
+#+begin_src rust
+#[repr(align(8))]
+pub struct EncInst {
+    bytes: [u8; 15], // max length of an instruction is 15 bytes?
+    length: u8,
+}
+#+end_src
+
+*** from_array<const N: usize>(array: [u8; N])
+just move the array into and `EncInst struct`
+**** Problem: if N >= 15 it would panic at runtime
+`panicked at 'index out of bounds: the len is N but the index is N',`
+*** append_array<const N: usize>(mut self, array: [u8; N])
+here though is present an assertion `assert!(p + N < 16);` to make sure the code doesn't panic
+
+

@@ -36,3 +36,19 @@ let init = GuestProgramInit::new() // <--- this is done anyway
 
 init.memory_config()?; // <-----
 #+end_src
+
+** crates/polkavm_assembler/src/assembler.rs
+line 167
+
+the method can panic if N > 15 -> maybe better to put an assertion like in method `append_array`
+
+** crates/polkavm_assembler/src/amd64.rs
+line 154
+
+#+begin_src rust
+let xs = value.to_le_bytes();
+enc.append_array([xs[0], xs[1], xs[2], xs[3]])
+
+// why not?
+enc.append_array(value.to_le_bytes());
+#+end_src

@@ -1,0 +1,17 @@
+
+* https://www-user.tu-chemnitz.de/~heha/hsn/chm/x86.chm/x64.htm
+** General
+x86-64 instruction may be at most 15 bytes in length, made by the following structure:
+
+| legacy prefix        | <-- lsb |
+| opcode with prefixes |         |
+| ModR/M               |         |
+| SIB                  |         |
+| Displacement         |         |
+| Immediate            | <-- msb |
+
+** Registers
+
+TODO
+
+** TODO

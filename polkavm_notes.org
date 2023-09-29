@@ -414,7 +414,10 @@ pub struct CompiledModule {
 
 *** new
 
-1. `Compiler::new(instructions, exports, debug_trace_execution)`
+1. `Compiler::new(instructions, exports, debug_trace_execution)`, init the compiler
+2. `let result = program_assembler.finalize()?;`, finalize the compilation
+3. TODO
+
 
 ** Compiler
 
@@ -444,14 +447,6 @@ struct Compiler<'a> {
 
 *** new
 1. creation of the `Assembler` -> initially empty
-   #+begin_src rust
-   pub struct Assembler {
-       origin: u64, // WHAT?! (TODO)
-       code: Vec<u8>,
-       labels: Vec<usize>,
-       fixups: Vec<Fixup>,
-   }
-   #+end_src
 2. and then those BOH things:
    #+begin_src rust
    let ecall_label = asm.forward_declare_label();
@@ -459,7 +454,6 @@ struct Compiler<'a> {
    let trace_label = asm.forward_declare_label();
    #+end_src
 
-   `forward_declare_label` :: this method just create a `Label` whith `usize::MAX` (a label is a transparent wrapper to usize)
 3. and then just construct the `Compiler` object
 
 *** finalize
@@ -476,7 +470,40 @@ struct CompilationResult<'a> {
 }
 #+end_src
 
-1. TODO !!
+1. make sure the initial code length of the `Assembler` object is zero
+2. set the origin of the code in the `Assembler`
+   `self.asm.set_origin(VM_ADDR_NATIVE_CODE);` (VM_ADDR_NATIVE_CODE = 4GiB)
+   Why the origin of the code in the Virtual Machine is set up at 4GiB? (TODO)
+3. fetch the next_instruction from the `instrucitons` array
+4. get the current length of the code -> `initial_length = self.asm.len()`
+5. fetch the current_instruction from the `instrucitons` array
+6. if trace_execution is enabled and the current_instruction is NOT an Opcode::jump_target
+   1. `self.trace_execution(nth_instruction);` -> (TODO)
+7. `instruction.visit(self).map_err(Error::from_static_str)?;`
+   1. self=Compiler -> `Compiler` implements `InstructionVisitor`, this means that for each instruction is possible to implement custom logic accepting the `Compiler` as arguments
+
+      How? because thmethod `visit` for each instruction, in the macro for each variant of the Opcode (inside the RawInstruction) there is a call to `visitor.name_of_instruction` where in this case the visitor is the `Compiler`
+
+8. TODO !??!?!?? or is it finished?
+
+
+*** implementation of InstructionVisitor
+for each instruction there is some logic to COMPILE the instruction, a common divisor is a call to the method `push`
+
+example of the `trap` implementation
+#+begin_src rust
+fn trap(&mut self) -> Self::ReturnTy {
+    self.push(jmp_label32(self.trap_label)); // (TODO: understand what and why trap_label (and lables) exists)
+    Ok(())
+}
+#+end_src
+
+`jmp_label32(self.trap_label)` -> this is a call to a method in `polkavm_assembler`, in this crate is implemented a struct for each instruction (I think) and each instruction implements the trait 'polkavm_assembler::Intstruction' needed by the `polkavm::Assembler'
+
+**as we can see here happens the 'recompiling' phase, where from risc-v instructions (trap in this case) we push an amd64 instruction (jmp_label32())**
+
+*** push(instructions)
+it just propagate the push of the instruction to the Assembler
 
 ** Linker
 
