@@ -1,0 +1,20 @@
+** How `ecalli` are translated to `syscall`?
+
+Am I wrong or syscall in x86 cause an interrupt to switch in kernel mode? then the IDT is used to undertand which interrupt is and fetch from the stack(?) the number of the system call? how this is solved?
+
+the instruction 'syscall' seems to not be used but another thing is done
+
+#+begin_src rust
+fn ecalli(&mut self, imm: u32) -> Self::ReturnTy {
+    self.push(load32_imm(TMP_REG, imm));
+    self.push(call_label32(self.ecall_label));
+
+    Ok(())
+}
+#+end_src
+
+-> here could be the response: `emit_ecall_trampoline`
+
+** Labels and Trampolines
+
+Why and What!?!?!?

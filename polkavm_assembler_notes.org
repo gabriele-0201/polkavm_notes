@@ -21,6 +21,7 @@ name8(self) -> &'static str
 #+end_src
 
 
+
 ** Imm (TODO: ?)
 
 Immediate value???
@@ -53,6 +54,16 @@ impl Imm {
 #+end_src
 
 
+** trait Instruction
+
+the trait `Instruction` is very simple, and it is present in the `polkavm_assembler` crate
+#+begin_src rust
+pub trait Instruction: Copy + core::fmt::Display {
+    fn encode(self) -> EncInst;
+    fn target_fixup(self) -> Option<(Label, u8, u8)>; // (TODO: WHAT IS THAT?!?!?!)
+}
+#+end_src
+
 ** Inst
 
 Structure representing x86 instructions
@@ -74,18 +85,82 @@ struct Inst {
 every function is `const` (lol)
 
 ** mod inst
-How instructions are represented? (TODO)
+How instructions are represented?
+
+each x86 instruction (or more complex things maybe, not only pure instructions are reported? I'm not sure) is abstracted by a struct (carrying some const encoding) and the implementation of the trait `Instruction`
+
+*** alu_imm(size: RegSize, reg: Reg, imm: i32, opext: u8) -> EncInst
+
+This function SEEMS to construct an Encoded Instruction (`EncInst`) from all the required things (regs, imm and opcode)
 
 
 *** impl_inst!
 
+500 lines instructions (I can't learn what each of this functions does)
+
+But what the macro does?
+
+#+begin_src rust
+// macro body
+(|$self:ident, $fmt:ident| $($name:ident($($arg:ty),*) => $body:expr, ($fmt_body:expr),)+) => {
+    $(
+        #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+        // struct created for each instruction
+        pub struct $name($(pub $arg),*);
+        impl $name {
+            // const encoding of the instruction based on the arguments
+            const fn encode_const($self) -> EncInst {
+                $body
+            }
+        }
+
+        impl core::fmt::Display for $name {
+            // implementation of the Display
+            fn fmt(&$self, $fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+                $fmt_body
+            }
+        }
+
+        // This is just the implementation of the trait used by Assembler
+        impl crate::Instruction for $name {
+            fn encode(self) -> EncInst {
+                self.encode_const()
+            }
+
+            // (TODO: BOH)
+            fn target_fixup(self) -> Option<(Label, u8, u8)> {
+                None
+            }
+        }
+
+        #[cfg(test)]
+        impl super::tests::GenerateTestValues for $name {
+            fn generate_test_values(mut cb: impl FnMut(Self)) {
+                impl_inst!(@generate_test_values cb, $name, $($arg),*);
+            }
+        }
+    )+
+};
 
 
-*** jmp_rel32 ???
+// example of usage
+impl_inst! { |self, fmt|
+    // this is the name of the instruction
+    ud2() =>
+        // this is the body of the encode_const function
+        EncInst::from_array([0x0f, 0x0b]),
+        // this is the body of the fmt function
+        (fmt.write_str("ud2")),
+}
+#+end_src
 
-*** jmp_label32
+**** generate_test_values (TODO, skip tests for now :-0 )
 
-This SEEMS to be just an abstraction over the real x86 instructions (TODO)
+
+*** Manually implemented Instruction
+there are other instructions, like: jmp_label8, jmp_label32, call_label32, jcc_label8 and jcc_label32
+
+those instructions are not in the macro because they have an implementation in the `target_fixup` method (all other instruction returns None)
 
 #+begin_src rust
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -94,7 +169,7 @@ impl jmp_label32 {
     // implementation of a const function, used later to encode the instruction
     const fn encode_const(self) -> EncInst {
         // here there is a subsequest call to another const encoding instruction
-        jmp_rel32(0).encode_const() // (TODO: WTF is jmp_rel32? ehehhh... macro magic again!)
+        jmp_rel32(0).encode_const() // (REUSE of already defined instruction)
     }
 }
 
@@ -132,18 +207,15 @@ this method just create a `Label` with `usize::MAX` (a label is a transparent wr
 
 *** push(inst: impl Instruction)
 
-the trait `Instruction` is very simple, and it is present in the `polkavm_assembler` crate
-#+begin_src rust
-pub trait Instruction: Copy + core::fmt::Display {
-    fn encode(self) -> EncInst;
-    fn target_fixup(self) -> Option<(Label, u8, u8)>;
-}
-#+end_src
-
 1. get the encoded instruction
 2. `add_fixup_if_necessary` (TODO: WHAT?)
 3. extend the `code` vec with the just created slice
 
+** enum Condition
+just abstraction over conditions like 'ne', 'le' etc.
+
+** enum LoadKind and StoreKind
+(TODO: not sure what those are)
 
 ** Label
 
@@ -151,6 +223,108 @@ pub trait Instruction: Copy + core::fmt::Display {
 #[repr(transparent)]
 pub struct Label(usize);
 #+end_src
+
+Where label are used?
+1. In the `Compiler::new` there are three labels that are defined like that:
+   #+begin_src rust
+   let ecall_label = asm.forward_declare_label();
+   let trap_label = asm.forward_declare_label();
+   let trace_label = asm.forward_declare_label();
+   #+end_src
+2. `forward_declare_label` just create incremental labels and push in the `labels` Vec in the Assembler struct just an usize::MAX
+
+   #+begin_src rust
+   pub fn forward_declare_label(&mut self) -> Label {
+       let label = self.labels.len();
+       self.labels.push(usize::MAX);
+       Label(label)
+   }
+   #+end_src
+
+3. Now the compiler struct has this three fields and the values are something like : 0, 1 and 2
+4. then they seems to be never used UNTIL the method `Compiler::finalize` is called!!! where "various trampolines are emitted" (WHAT?!)
+5. inside `emit_trap_trampoline`
+   the first line is: `self.define_label(self.trap_label);` (where self.trap_label should be 1)
+6. `Compiler::define_label(Label)`
+   it just call `Assembler::define_label(Label)`
+7. `Assembler::define_label`
+   #+begin_src rust
+   pub fn define_label(&mut self, label: Label) -> &mut Self {
+       // That's why `forward_declare_label` pushed usize::MAX in the Vec
+       assert_eq!(self.labels[label.0], usize::MAX, "tried to redefine an already defined label");
+       // make the label to point to the current end of the instruction,
+       // so that the `emit_trap_trampoline` will push all the instructions to 'implement' the trap trampoline
+       self.labels[label.0] = self.code.len();
+       self
+   }
+   #+end_src
+
+   The same thing happens when is called when  `emit_ecall_trampoline`
+
+*** TRAMPOLINES
+those are pieces of code that connects the host with the guest
+
+trace, trap and ecall has similar (if not identical, beside the actual code pushed into the assembler) implementation
+1. use pre-defined label
+2. associate to the label the length of the code
+3. push in the code more instructions that implement the label
+
+**** trace_trampoline (only if trace_execution enabled)
+**** trap_trampoline
+glue to manage trap and returning safely into the host
+
+#+begin_src rust
+self.save_registers_to_vmctx();
+self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL));
+self.push(load32_imm(rdi, SYSCALL_TRAP));
+self.push(jmp_reg(TMP_REG));
+#+end_src
+**** ecall_trampoline
+
+#+begin_src rust
+self.push(push(TMP_REG)); // Save the ecall number.
+self.save_registers_to_vmctx();
+self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL));
+self.push(load32_imm(rdi, SYSCALL_HOSTCALL));
+self.push(pop(rsi)); // Pop the ecall number as an argument.
+self.push(call_reg(TMP_REG));
+self.restore_registers_from_vmctx();
+self.push(ret());
+#+end_src
+
+**** export_trampolines
+
+this implementation a lot different from the previous one, the first thing to notice is that a new "trampoline" is added for EACH export, how?
+#+begin_src rust
+for export in self.exports {
+    log::trace!("Emitting trampoline: export: '{}'", export.prototype().name());
+
+    // this function just create a new incremental Lable associating to the label the
+    // current size of the code (binary)
+    let trampoline_label = self.asm.create_label();
+    // inserting in a field of the Compiler a connection between the address of an exports
+    // and the index of the Label
+    self.export_to_label.insert(export.address(), trampoline_label);
+    // WHAT!?!?! (TODO)
+    self.restore_registers_from_vmctx();
+
+    // WHAT!?!?! (TODO)
+    let target_label = self.get_or_forward_declare_label(export.address());
+    self.push(jmp_label32(target_label));
+}
+#+end_src
+
+**** emit_sysreturn
+
+Almost identical to the first three, just the lable wasn't already created and made by `create_label`
+
+#+begin_src rust
+self.save_registers_to_vmctx();
+self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL));
+self.push(load32_imm(rdi, SYSCALL_RETURN));
+self.push(jmp_reg(TMP_REG));
+#+end_src
+
 
 
 ** EncInst

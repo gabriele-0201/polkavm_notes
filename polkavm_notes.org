@@ -172,7 +172,7 @@ pub struct ProgramExport<'a> {
 + And the Structure change a bit
 | what              | size                                                                                      |
 | number of exports | varint                                                                                    |
-| index             | before each function there is a varint encoding the index of the following fn * n_exports |
+| address      | before each function there is a varint encoding the address of the following fn * n_exports |
 | fn_protoype       | fn_protoype * n_exports                                                                   |
 
 ** ExternTy
@@ -473,18 +473,34 @@ struct CompilationResult<'a> {
 1. make sure the initial code length of the `Assembler` object is zero
 2. set the origin of the code in the `Assembler`
    `self.asm.set_origin(VM_ADDR_NATIVE_CODE);` (VM_ADDR_NATIVE_CODE = 4GiB)
-   Why the origin of the code in the Virtual Machine is set up at 4GiB? (TODO)
-3. fetch the next_instruction from the `instrucitons` array
-4. get the current length of the code -> `initial_length = self.asm.len()`
-5. fetch the current_instruction from the `instrucitons` array
-6. if trace_execution is enabled and the current_instruction is NOT an Opcode::jump_target
-   1. `self.trace_execution(nth_instruction);` -> (TODO)
-7. `instruction.visit(self).map_err(Error::from_static_str)?;`
-   1. self=Compiler -> `Compiler` implements `InstructionVisitor`, this means that for each instruction is possible to implement custom logic accepting the `Compiler` as arguments
+   Why the origin of the code in the Virtual Machine is set up at 4GiB? (TODO: WHY THIS DECISION?)
 
-      How? because thmethod `visit` for each instruction, in the macro for each variant of the Opcode (inside the RawInstruction) there is a call to `visitor.name_of_instruction` where in this case the visitor is the `Compiler`
+3. iterate over the instructions
 
-8. TODO !??!?!?? or is it finished?
+   1. fetch the next_instruction from the `instrucitons` array
+   2. get the current length of the code -> `initial_length = self.asm.len()`
+   3. fetch the current_instruction from the `instrucitons` array
+   4. if trace_execution is enabled and the current_instruction is NOT an Opcode::jump_target
+      1. `self.trace_execution(nth_instruction);` -> (TODO: MMHH I WILL EVER ARRIVE TO THAT POINT?)
+   5. `instruction.visit(self).map_err(Error::from_static_str)?;`
+      1. self=Compiler -> `Compiler` implements `InstructionVisitor`, this means that for each instruction is possible to implement custom logic accepting the `Compiler` as arguments, what is done in the custom logic?
+
+         + mainly here seems to happen all the 'translation' logic between risc-v and x68 instructions, because `visit` is called on the risc-v instruction and inside the method are pushed in the assembler struct the x86 instructions
+
+         How? because the method `visit` for each instruction, in the macro for each variant of the Opcode (inside the RawInstruction) there is a call to `visitor.name_of_instruction` where in this case the visitor is the `Compiler`
+
+   6. LITERALLY THE SAME THING AS POINT 5 WHY!?!??! (TODO)
+
+   7. if NOT enable trace execution then there is a check over the maximum size of the encoded instruction length
+
+4. `self.trap().map_err(Error::from_static_str)?;` adding a trap at the end of the program to make sure it ends correctly
+5. "emitting trampolines??" (more or less explained in [[polkavm_assembler_notes]])
+   1. if debug_trace_execution -> emit_trace_trampoline (TODO: What?!)
+   2. emit_trap_trampoline
+   3. emit_ecall_trampoline
+   4. emit_export_trampolines
+   5. emit_sysreturn
+6. TODO <- finish this function
 
 
 *** implementation of InstructionVisitor
