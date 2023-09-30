@@ -17,4 +17,18 @@ fn ecalli(&mut self, imm: u32) -> Self::ReturnTy {
 
 ** Labels and Trampolines
 
-Why and What!?!?!?
+Why and What!?!?!? -> OK, more or less I understood lables and what trampolines are (not perfectly what each trampoline does)
+
+** Different fields in the `Compiler` struct
++ pc_to_label ?
++ pc_to_label_pending
++ max_jump_target
++ jump_table
+
+  Those I have a feeling of knowing what they are BUT still not 100% sure:
++ export_to_label
++ export_trampolines
+
+And finally:
+  + regs_are_64bit
+currently it is all 32 bit BUT MHHH not sure about the difference....

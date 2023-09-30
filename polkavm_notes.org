@@ -500,7 +500,33 @@ struct CompilationResult<'a> {
    3. emit_ecall_trampoline
    4. emit_export_trampolines
    5. emit_sysreturn
-6. TODO <- finish this function
+6. make sure that the field `Compiler.pc_to_label_pending` is empty (TODO: what this field is used for?)
+7. fetch the native pointer size with `core::mem::size_of::<usize>()`
+8. resize the jump_table: `self.jump_table.resize((self.max_jump_target as usize + 1) * native_pointer_size, 0);` (TODO: WHY??)
+9. iterate over `pc_to_label` field
+   the following snipped DOESN'T make any sense for now... (TODO)
+   #+begin_src rust
+   for (pc, label) in self.pc_to_label.drain() {
+       let pc = pc as usize;
+       let range = pc * native_pointer_size..(pc + 1) * native_pointer_size;
+       let address = VM_ADDR_NATIVE_CODE + self.asm.get_label_offset(label) as u64;
+       log::trace!("Jump table: [0x{:x}] = 0x{:x}", VM_ADDR_JUMP_TABLE + range.start as u64, address);
+       self.jump_table[range].copy_from_slice(&address.to_ne_bytes());
+   }
+    #+end_src
+10. Update `export_trampolines`
+
+    translation of the exports address to the native_address (not address of the exports but to the label that should point to the final real export) (TODO: Are you sure? Is this even english?)
+    #+begin_src rust
+    self.export_trampolines.reserve(self.exports.len());
+    for export in self.exports {
+        let label = self.export_to_label.get(&export.address()).unwrap();
+        let native_address = VM_ADDR_NATIVE_CODE + self.asm.get_label_offset(*label) as u64;
+        self.export_trampolines.push(native_address);
+    }
+    #+end_src
+
+
 
 
 *** implementation of InstructionVisitor

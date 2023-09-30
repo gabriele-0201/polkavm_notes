@@ -318,6 +318,8 @@ for export in self.exports {
 
 Almost identical to the first three, just the lable wasn't already created and made by `create_label`
 
+(TODO: what this does?)
+
 #+begin_src rust
 self.save_registers_to_vmctx();
 self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL));
