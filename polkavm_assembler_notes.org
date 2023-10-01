@@ -294,14 +294,21 @@ self.push(ret());
 
 **** export_trampolines
 
-this implementation a lot different from the previous one, the first thing to notice is that a new "trampoline" is added for EACH export, how?
+this implementation a lot different from the previous one
 #+begin_src rust
 for export in self.exports {
     log::trace!("Emitting trampoline: export: '{}'", export.prototype().name());
 
     // this function just create a new incremental Lable associating to the label the
     // current size of the code (binary)
+
+    // the lable contain the TRAMPOLNE code,
+    // it should be the glue to enter in the export function
+
+    // the host will call this trampoline and here
+    // should be present a call to the real export
     let trampoline_label = self.asm.create_label();
+
     // inserting in a field of the Compiler a connection between the address of an exports
     // and the index of the Label
     self.export_to_label.insert(export.address(), trampoline_label);

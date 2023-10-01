@@ -1,0 +1,94 @@
+
+* RISC-V Instruction Set Manual Notes
+** polkavm guest toolchain -> "rv32e"
+
+** Overview
+The RISC-V ISA is defined as a base integer ISA, which must be present in any implementation, plus optional extensions to the base ISA.
+
+The base is carefully restricted to a minimal set of instructions sufficient to provide a reasonable target for compilers, assemblers, linkers, and operating systems
+
+RV32E subset variant of the RV32I base instruction set, which has been added to support small microcontrollers
+
+The base integer ISA is named “I” (prefixed by RV32 or RV64 depending on integer reg- ister width), and contains integer computational instructions, integer loads, integer stores, and control-flow instructions, and is mandatory for all RISC-V implementations.
+
+RISC-V will endeavor to keep the base and each standard extension constant over time, and instead layer new instructions as further optional extensions.
+
+** Instruction Length Encoding
+The base RISC-V ISA has fixed-length 32-bit
+
+standard RISC-V encoding scheme is designed to support ISA extensions with variable-length instructions, where each instruction can be any number of 16-bit instruction parcels in length (Chapter 12)
+
+RISC-V ISA has a little-endian memory system
+
+** Exceptions, Trap and Interrupts
++ Exceptions :: unusual condition occurring at run time associated with an instruction in the current RISC-V thread
++ Trap :: synchronous transfer of control to a trap handler caused by an exceptional condition occurring within a RISC-V thread
++ Interrupts :: external event that occurs asynchronously to the current RISC-V thread
+
+** RV32I
+Base Integer Subset -> with 32 general purposes registers (first is handwired to zero)
+
+pc -> program counter register (it is additional, over the 32 provided)
+
+*** Instruction format
+Not useful because is used another one in polkavm
+*** Immediate Encoding Variants
+Idem
+*** Base Integer Subset
+Explanation of how Integer instruction are encoded (TODO if needed)
+*** Control Transfer Instructions
+RV32I provides two types of control transfer instructions: unconditional jumps and conditional branches
+
+Control transfer instructions in RV32I do not have architecturally visible delay slots -> a delay slots should be instructions right after a branch instruction that are executed even if the branch is taken, why this happen? To execute one instruction per clock the pipeline that provide the instructions to the CPU takes more than one at the time, this means that could happen that some instructions are evaluated even if shouldn't
+
+**** Unconditional Jumps
++ The jump and link (JAL) instruction uses the J-type format, where the J-immediate encodes a signed offset in multiples of 2 bytes. The offset is sign-extended and added to the pc to form the jump target address
+
+Jumps can therefore target a ±1 MiB range
+
++ The indirect jump instruction JALR (jump and link register) uses the I-type encoding. The target address is obtained by adding the 12-bit signed I-immediate to the register rs1
+
+The JAL and JALR instructions will generate a misaligned instruction fetch exception if the target address is not aligned to a four-byte boundary.
+
++ weird things on where is pushed the return address
+
+**** Conditional Branches
+The conditional branch range is ±4 KiB.
+
+*** Load and Store Instructions
++ RV32I is a load-store architecture, where only load and store instructions access memory and arithmetic instructions only operate on CPU registers.
+
++ RV32I provides a 32-bit user address space that is byte-addressed and little-endian.
+
+*** Memory Model
+'This section is out of date as the RISC-V memory model is currently under revision to ensure it can efficiently support current programming language memory models.'
+
+*** Control and Status Register Instructions
+
+**** CSR Instructions
+(TODO)
+**** Timers and Counters
+(TODO)
+*** Environment Call and Breakpoints
++ The ECALL instruction is used to make a request to the supporting execution environment, which is usually an operating system.
+
++ The EBREAK instruction is used by debuggers to cause control to be transferred back to a debug- ging environment.
+
+
+** RV32E
+reduced version of RV32I designed for embedded systems
+
+RV32E reduces the integer register count to 16 general-purpose registers, (x0–x15), where x0 is a
+dedicated zero register.
+*** Instruction Set
+RV32E uses the same instruction set encoding as RV32I, except that use of register specifiers x16–x31 in an instruction will result in an illegal instruction exception being raised. (but in polkavm a variable length encoding is used)
+** “C” Standard Extension for Compressed Instructions
+
+RVC uses a simple compression scheme that offers shorter 16-bit versions of common 32-bit RISC-V instructions when:
+
++ the immediate or address offset is small
++ one of the registers is the zero register (x0), the ABI link register (x1), or the ABI stack pointer (x2)
++ the destination register and the first source register are identical
++ the registers used are the 8 most popular ones
+
+*** TODO

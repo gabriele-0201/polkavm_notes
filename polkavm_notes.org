@@ -423,19 +423,36 @@ pub struct CompiledModule {
 
 #+begin_src rust
 struct Compiler<'a> {
+    // Abstraction over the 'real' assembler,
+    // this object will manage the produced code
     asm: Assembler,
+    // List of all the Exports provided by the guest
     exports: &'a [ProgramExport<'a>],
+    // List of all the risc-v quest instruciton
     instructions: &'a [RawInstruction],
+    // TODO
     pc_to_label: HashMap<u32, Label>,
+    // TODO
     pc_to_label_pending: HashMap<u32, Label>,
+    // name self explanatory, idk where is used
     next_instruction: Option<RawInstruction>,
+    // Should be the max size of the code,
+    // to make sure the guest is properly sandboxed
     max_jump_target: u32,
+    // TODO
     jump_table: Vec<u8>,
+    // For each export is created a Label and this
+    // map store the connection between the adress (in the risc-v blob) of an export and the Label associated to it
     export_to_label: HashMap<u32, Label>,
+    // TODO
     export_trampolines: Vec<u64>,
+    // Enable or not tracing
     debug_trace_execution: bool,
+    // number of the label where an ecall instruction should be handled
     ecall_label: Label,
+    // number of the label where a trap instruction should be handled
     trap_label: Label,
+    // TODO
     trace_label: Label,
 
     /// Whether we're compiling a 64-bit program. Currently totally broken and mostly unimplemented.
@@ -545,7 +562,33 @@ fn trap(&mut self) -> Self::ReturnTy {
 **as we can see here happens the 'recompiling' phase, where from risc-v instructions (trap in this case) we push an amd64 instruction (jmp_label32())**
 
 *** push(instructions)
+
 it just propagate the push of the instruction to the Assembler
+
+*** save_registers_to_vmctx
+
+Save registers to Virtual Machine Context
+
+#+begin_src rust
+fn save_registers_to_vmctx(&mut self) {
+    if self.regs_are_64bit {
+        todo!();
+    }
+
+    assert_eq!(Reg::ALL_NON_ZERO.len(), core::mem::size_of_val(VmCtx::new().regs()) / 4);
+
+    self.push(load64_imm(TMP_REG, regs_address()));
+    for (nth, reg) in Reg::ALL_NON_ZERO.iter().copied().enumerate() {
+        self.push(store_indirect(RegSize::R64, TMP_REG, nth as i32 * 4, conv_reg(reg), StoreKind::U32));
+    }
+}
+#+end_src
+
+** VmCtx
+The virtual machine context.
+
+This is mapped in shared memory and used by the sandbox to keep its state in, as well as by the host to communicate with the sandbox.
+
 
 ** Linker
 
