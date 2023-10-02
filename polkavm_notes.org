@@ -443,8 +443,12 @@ struct Compiler<'a> {
     jump_table: Vec<u8>,
     // For each export is created a Label and this
     // map store the connection between the adress (in the risc-v blob) of an export and the Label associated to it
+    // (each label is a trampoline to access the real export code)
     export_to_label: HashMap<u32, Label>,
-    // TODO
+    // This vec contains the address (in the final code) of the trampolines
+    // each values is composed like this:
+    // `VM_ADDR_NATIVE_CODE + self.asm.get_label_offset(*label) as u64` where the label is the associated label to the
+    // address of the export in the risc-v blob
     export_trampolines: Vec<u64>,
     // Enable or not tracing
     debug_trace_execution: bool,
@@ -531,9 +535,11 @@ struct CompilationResult<'a> {
        self.jump_table[range].copy_from_slice(&address.to_ne_bytes());
    }
     #+end_src
-10. Update `export_trampolines`
+10. Update `export_trampolines`, in this vector will be pushed all the addresses of the trampolines to the final exports,
+    in the `emit_export_trampolines` those trampolines were created inside some labels and each label was associated with the address (in risc-v blob) of an exports
 
-    translation of the exports address to the native_address (not address of the exports but to the label that should point to the final real export) (TODO: Are you sure? Is this even english?)
+    SO: export_trampolines -point_to-> trampoline (a label) -point to-> real export
+
     #+begin_src rust
     self.export_trampolines.reserve(self.exports.len());
     for export in self.exports {
