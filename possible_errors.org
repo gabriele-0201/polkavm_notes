@@ -52,3 +52,39 @@ enc.append_array([xs[0], xs[1], xs[2], xs[3]])
 // why not?
 enc.append_array(value.to_le_bytes());
 #+end_src
+
+** crates/polkavm_derive_impl/src/import.rs
+
+In this code `parse_import_attributes` return a Vec BUT `import_index` is an Option<u32>
+
+#+begin_src rust
+if let Some(attributes) = parse_import_attributes(&attr)? {
+    for attribute in attributes {
+        match attribute {
+            ImportAttribute::Index(index) => {
+                import_index = Some(index);
+            }
+        }
+    }
+
+    continue;
+}
+#+end_src
+*** there are two problems
+**** 1.
+#+begin_src rust
+// this code
+match attribute {
+    ImportAttribute::Index(index) => {
+        import_index = Some(index);
+    }
+}
+
+//could be reduced to this
+if let ImportAttribute::Index(index) = attribute {
+        import_index = Some(index);
+}
+#+end_src
+
+**** 2.
+`import_index` will assume the value of the LAST element in the Vec, is that normal? Why a single function inside an extern block can have multiple index specified??

@@ -550,8 +550,6 @@ struct CompilationResult<'a> {
     #+end_src
 
 
-
-
 *** implementation of InstructionVisitor
 for each instruction there is some logic to COMPILE the instruction, a common divisor is a call to the method `push`
 
@@ -590,11 +588,52 @@ fn save_registers_to_vmctx(&mut self) {
 }
 #+end_src
 
+
+*** restore_registers_from_vmctx
+
+Restore registers from the Virtual Context
+#+begin_src rust
+fn restore_registers_from_vmctx(&mut self) {
+    if self.regs_are_64bit {
+        todo!();
+    }
+
+    // load in the RCX register the address of all the regs
+    self.push(load64_imm(TMP_REG, regs_address()));
+    for (nth, reg) in Reg::ALL_NON_ZERO.iter().copied().enumerate() {
+        // load into each register the prev state
+        self.push(load_indirect(conv_reg(reg), RegSize::R64, TMP_REG, nth as i32 * 4, LoadKind::U32));
+    }
+}
+#+end_src
+
+*** get_or_forward_declare_label
+
+#+begin_src rust
+fn get_or_forward_declare_label(&mut self, pc: u32) -> Label {
+    match self.pc_to_label.get(&pc) {
+        // if there is a label associated to a pc then return it
+        Some(label) => *label,
+        // otherwise
+        None => match self.pc_to_label_pending.get(&pc) {
+            // if there is a pending label then return it
+            Some(label) => *label,
+            // otherwise create a new label (with max value in the Assembler)
+            None => {
+                let label = self.asm.forward_declare_label();
+                self.pc_to_label_pending.insert(pc, label);
+                label
+            }
+        },
+    }
+}
+#+end_src
+
 ** VmCtx
+
 The virtual machine context.
 
 This is mapped in shared memory and used by the sandbox to keep its state in, as well as by the host to communicate with the sandbox.
-
 
 ** Linker
 

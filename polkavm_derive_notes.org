@@ -1,0 +1,215 @@
+* Polkavm_Derive
+As we can see the Derive crate is just a simple wrapper over `polkavm_derive_impl`
+
+#+begin_src rust
+#[proc_macro_attribute]
+pub fn polkavm_import(args: TokenStream, input: TokenStream) -> TokenStream {
+    // Parsing the args and input
+    syn::parse_macro_input!(args as syn::parse::Nothing);
+    // A block of foreign items: `extern "C" { ... }.`
+    let input = syn::parse_macro_input!(input as syn::ItemForeignMod);
+
+
+    // Call the real proc macro
+    match polkavm_derive_impl::polkavm_import(input) {
+        Ok(result) => result.into(),
+        Err(error) => error.into_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn polkavm_export(args: TokenStream, input: TokenStream) -> TokenStream {
+    syn::parse_macro_input!(args as syn::parse::Nothing);
+    // Parsing A free-standing function: fn process(n: usize) -> Result<()> { ... }.
+    let input = syn::parse_macro_input!(input as syn::ItemFn);
+
+    // Call the real proc macro
+    match polkavm_derive_impl::polkavm_export(input) {
+        Ok(result) => result.into(),
+        Err(error) => error.into_compile_error().into(),
+    }
+}
+#+end_src
+
+What are `args` and what are `input`???
+
+Explenation from https://doc.rust-lang.org/reference/procedural-macros.html#attribute-macros:
+"Attribute macros are defined by a public function with the proc_macro_attribute attribute that has a signature of (TokenStream, TokenStream) -> TokenStream. The first TokenStream is the delimited token tree following the attribute's name, not including the outer delimiters. If the attribute is written as a bare attribute name, the attribute TokenStream is empty. The second TokenStream is the rest of the item including other attributes on the item. The returned TokenStream replaces the item with an arbitrary number of items."
+
+* Polkavm_Derive_Impl
+** common
+*** unsupported
+just return a syn::Error
+*** unsupported_if_some
+return an error if the value is Some
+
+Used to make sure that the code does not contain some contents
+
+*** is_path_eq
+TODO
+*** is_doc(&syn::Attribute)
+return true if passed argument is a doc attribute
+*** is_cfg(&syn::Attribute)
+return true if passed argument is a cfg attribute
+*** is_rustfmt(&syn::Attribute)
+return true if passed argument is a 'rustfmt::skip' attribute
+*** enum SimpleTy
+enum used to represent what definied in the guest
+
+`parse_ty` retrive this enum from a `syn::Type` (what the syn parser return in the proc macro)
+*** enum Bitness
+*** conv_ty(SimpleTy, Bitness) -> polkavm_common::program::ExternTy
+convert a SimpleTy and its bitness to an ExternTy
+*** parse_ty(syn::Type) -> SimpleTy
+Conversion from syn Type to SimpleTy
+*** bytes_to_asm
+TODO
+*** used_regs(SimpleTy, Bitness) -> usize
+returns the number of registers needed to store a SimpleTy with a given Bitness
+*** create_fn_prototype(&syn::Signature, Bitness) -> FnMetadata
+fn_prototype is what describe an import or export function
+
+1. define `available_regs` and make sure is less then polkavm_common::abi::VM_MAXIMUM_EXTERN_ARG_COUNT (currently =6)
+2. iterate over the inputs of the signature
+   1. attrs (marco stuff?) over inputs are not allowed
+   2. only accept syn::Pat::Ident Patter, and make sure there's no attrs(again? TODO), it is not a Reference and is not defined as mutable
+      #+begin_src rust
+      // TODO: what is that???
+      if let Some((_, ref subpat)) = pat.subpat {
+          unsupported!(subpat);
+      }
+      #+end_src
+   3. Parse the syn::Type to SimpleTy
+   4. decrease the `available_regs` by the number of register used by the SimpleTy
+      #+begin_src rust
+      available_regs -= used_regs(ty, bitness) as isize;
+      #+end_src
+   5. collect the type into a vec: `parsed_args`
+3. make sure available_regs >= 0
+4. parse the return type
+   Only Nothing, empty tuple and a valid syn::Type are allowed
+5. Construct `polkavm_common::elf::FnMetadata` converting each `SimpleTy` (args and return type) into `ExternTy`
+
+
+** import
+*** mod kw
+
+#+begin_src rust
+mod kw {
+    // This macro will define 'index' as a keyword
+    // and provide a lot of different things like the ability to peek and parsing this new keyword
+    syn::custom_keyword!(index);
+}
+#+end_src
+*** ImportAttribute
+
+#+begin_src rust
+enum ImportAttribute {
+    Index(u32),
+}
+#+end_src
+
+**** impl syn::parse::Parse for ImportAttribute
+
+#+begin_src rust
+fn parse(input: syn::parse::ParseStream) -> syn::parse::Result<Self> {
+    // MMHHH construct something that makes easier the peeking
+    let lookahead = input.lookahead1();
+    if lookahead.peek(kw::index) {
+        input.parse::<kw::index>()?; // make sure what we are parsing is the kx::index
+        let _: Token![=] = input.parse()?; // make sure that after there is an = sign
+
+        // (TODO: WHAT?!?!)
+        let value: syn::LitInt = input.parse()?;
+        let value = value.base10_parse::<u32>().map_err(|err| syn::Error::new(value.span(), err))?;
+
+        // the above line should just parse the value of the index
+        Ok(ImportAttribute::Index(value))
+    } else {
+        Err(lookahead.error())
+    }
+}
+#+end_src
+
+*** generate_import_assembly(Option<u32>, &syn::Signature, Bitness) -> proc_macro2::TokenStream
+(TODO)
+
+*** parse_import_attributes(syn::Attribute) -> Option<Vec<ImportAttribute>>
+
+This method parse the attribute into a list of ImportAttribute (using implicitly the previously implemented syn::parse::Parse method)
+
+(TODO: why a List an not a single ImportAttribute is specified in the Attribute?)
+
+*** polkavm_import(syn::ItemForeignMod) -> proc_macro2::TokenStream
+
+This derive macro is applied to all the imports expected in a guest program
+example:
+
+#+begin_src rust
+#[polkavm_derive::polkavm_import]
+extern "C" {
+    fn get_third_number() -> u32;
+}
+#+end_src
+
+This pass through the `polkavm_derive::polkavm_import` that will then call this macro passing only the input and NOT the args.
+
+input only will be:
+#+begin_src rust
+extern "C" {
+    fn get_third_number() -> u32;
+}
+#+end_src
+
+What the macro does to the input is:
+
+1. collect into `outer_cfg_attributes` all the cfg_attributes, if other type of attribute are provided then return Err
+2. make sure the specified abi of the extern block is "C"
+3. Iterate over the `input.items` and make sure there are only function signature inside the extern block, and or each signature:
+   1. Make sure the attributes are allowed, those can be: rustfmt, cfg, doc, import_attribute (this is the specified index of the attribute)
+   2. Every other attribute will generate an error
+4. all of the following things are NOT accept:
+   #+begin_src rust
+   unsupported_if_some!(sig.constness);
+   unsupported_if_some!(sig.asyncness);
+   unsupported_if_some!(sig.unsafety);
+   unsupported_if_some!(sig.abi);
+   unsupported_if_some!(sig.generics.lt_token);
+   unsupported_if_some!(sig.generics.params.first());
+   unsupported_if_some!(sig.generics.gt_token);
+   unsupported_if_some!(sig.generics.where_clause);
+   unsupported_if_some!(sig.variadic);
+   #+end_src
+   1. call to `generate_import_assembly` (TODO: what this does?)
+   2. Create new code composed by the cfgs, assembly things and the extern function
+5. finally return the composition of all the signatures
+
+From one extern block with n functions will be created n extern blocks with one function for each
+
+** export
+*** generate_export_assembly(syn::Signature, Bitness) -> proc_macro2::TokenStream
+
+*** is_no_mangle
+
+*** polkavm_export
+
+1. iterate over the input attributes, they can only be:
+   + rustfmt
+   + cfg
+   + doc
+   + no_mangle
+2. Unsupported things in the function signature are:
+   + constness
+   + asyncness
+   + unsafety
+   + generics.lt_token
+   + generics.params
+   + generics.gt_token
+   + generics.where_clause
+   + variadic
+3. "C" abi is requested
+4. generate_export_assembly
+5. create the output adding the generated assembly AND adding this macro before the function
+   `#[cfg_attr(any(target_arch = "riscv32", target_arch = "riscv64"), link_section = ".text.polkavm_export")]`
+
+   link_section = Specifies the section of an object file to use for a function or static.

@@ -154,6 +154,10 @@ impl_inst! { |self, fmt|
 }
 #+end_src
 
+INTERESTING FACT:
+
+the struct implemented for each instruction utilize a tuple to contain the arguments, this mean that when you want to construct it you will not use the usual struct syntax but the syntax of calling a function (because also the low_case of the struct name)
+
 **** generate_test_values (TODO, skip tests for now :-0 )
 
 
@@ -312,11 +316,21 @@ for export in self.exports {
     // inserting in a field of the Compiler a connection between the address of an exports
     // and the index of the Label
     self.export_to_label.insert(export.address(), trampoline_label);
-    // WHAT!?!?! (TODO)
+
+    // This function restore the state of the register from the Virtual Context
+    // (TODO: why before calling the export function the register are restored?
+    //  Those should be zero? and from one export call and another shouldn't be any way to communicate?)
     self.restore_registers_from_vmctx();
 
-    // WHAT!?!?! (TODO)
+    // Here we will get or declare a label,
+    // the function accept the pc and here is provided the adderess of the export in the risc-v
+
+    // TODO: PROBLEM if the label wasn't defined previously defined then the label in the assembler will have associate a usize::MAX -> how this can work?
+
+    // the label was already defined somewhere else?
     let target_label = self.get_or_forward_declare_label(export.address());
+
+    // push the code to jump to the export function code
     self.push(jmp_label32(target_label));
 }
 #+end_src

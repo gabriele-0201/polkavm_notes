@@ -20,8 +20,11 @@ fn ecalli(&mut self, imm: u32) -> Self::ReturnTy {
 Why and What!?!?!? -> OK, more or less I understood lables and what trampolines are (not perfectly what each trampoline does)
 
 ** Different fields in the `Compiler` struct
-+ pc_to_label ?
++ pc_to_label
 + pc_to_label_pending
+
+Is PC = program counter? if yes then the map pc_to_label then doesn't make any sense because the PC in the risc-v instruction is used to point to the exports, this menans that in the export the address is the i-th instruction? and not a byte address? -> I'm confused by this
+
 + max_jump_target
 + jump_table
 
@@ -34,3 +37,7 @@ And finally:
 currently it is all 32 bit BUT MHHH not sure about the difference....
 
 ** Where is specified the C extension for the compilation of the guest program? polkatool link does this?
+
+** Inside the trampolines to export function
+
+Why before calling the export function the state of the registers are restored from the virtual context?

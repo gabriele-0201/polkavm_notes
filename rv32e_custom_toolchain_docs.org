@@ -1,0 +1,66 @@
+* rv32e custom toolchain cration OLD
+
+I found https://github.com/koute/rustc-rv32e
+
+** clone rust repository
+
+#+begin_src shell
+git clone https://github.com/rust-lang/rust.git
+cd rust
+#+end_src
+
+** clone and cd into llvm-project
+
+#+begin_src shell
+git submodule update --init --recursive
+cd src/llvm-project
+#+end_src
+
+** apply parch differential D70401
+This patch will add all the codegen changes needed to build `rv32e`
+
+#+begin_src shell
+wget https://reviews.llvm.org/D70401?download=true -O D70401.diff
+git apply D70401.diff
+
+# Apply changes to LLVM
+git add .
+git commit -m "Apply D70401"
+cd ..
+# Apply changed LLVM to Rust
+git add src/llvm-project
+git commit -m "Use custom LLVM"
+#+end_src
+
+if the merge conflic is TOO complex this is a branch with the patch already applied https://github.com/Noxime/llvm-project/tree/rv32e
+
+** Change config.toml
+
+#+begin_src shell
+cd ~/rust
+
+cat config.toml
+> # Use defaults for codegen affecting custom builds
+> profile = "codegen"
+>
+> [llvm]
+> # Use our own LLVM build instead of downloading from CI
+> download-ci-llvm = false
+>
+> [rust]
+> # Enable building LLD for our target as well
+> lld = true
+
+
+#+end_src
+
+** time to build rust
+#+begin_src shell
+python3 x.py build
+#+end_src
+
+** Add new Rust toolchain to rustup
+
+#+begin_src shell
+rustup toolchain link rv32e ~/rust/build/host/stage1
+#+end_src
