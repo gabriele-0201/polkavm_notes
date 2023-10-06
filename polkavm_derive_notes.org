@@ -189,6 +189,10 @@ From one extern block with n functions will be created n extern blocks with one 
 ** export
 *** generate_export_assembly(syn::Signature, Bitness) -> proc_macro2::TokenStream
 
+things are created here (TODO)
+
+to notice: `(".pushsection .polkavm_imports.{},\"a\",@progbits", name)` this is done to let the liker find this sections
+
 *** is_no_mangle
 
 *** polkavm_export

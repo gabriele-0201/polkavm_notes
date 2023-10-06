@@ -459,7 +459,7 @@ struct Compiler<'a> {
     // TODO
     trace_label: Label,
 
-    /// Whether we're compiling a 64-bit program. Currently totally broken and mostly unimplemented.
+    /// Whether we're coand mostly unimplemented.
     // TODO: Fix this.
     regs_are_64bit: bool,
 }
@@ -621,6 +621,7 @@ fn get_or_forward_declare_label(&mut self, pc: u32) -> Label {
             // otherwise create a new label (with max value in the Assembler)
             None => {
                 let label = self.asm.forward_declare_label();
+                // TODO
                 self.pc_to_label_pending.insert(pc, label);
                 label
             }

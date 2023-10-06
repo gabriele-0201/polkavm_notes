@@ -24,6 +24,12 @@ GuestMemoryConfig::new(
     blob.stack_size() as u64,
 )
 .map_err(Error::from_static_str)?;
+
+let init = GuestProgramInit::new() // <--- this is done anyway
+    .with_ro_data(blob.ro_data())
+    .with_rw_data(blob.rw_data())
+    .with_bss(blob.bss_size())
+    .with_stack(blob.stack_size());
 #+end_src
 
 can be substitute with:
@@ -40,7 +46,7 @@ init.memory_config()?; // <-----
 ** crates/polkavm_assembler/src/assembler.rs
 line 167
 
-the method can panic if N > 15 -> maybe better to put an assertion like in method `append_array`
+the method can panic if N > 15 -> maybe better to put an assertion in method `append_array`? Just to not panic at runtime
 
 ** crates/polkavm_assembler/src/amd64.rs
 line 154
@@ -88,3 +94,15 @@ if let ImportAttribute::Index(index) = attribute {
 
 **** 2.
 `import_index` will assume the value of the LAST element in the Vec, is that normal? Why a single function inside an extern block can have multiple index specified??
+
+** example/host
+
+to get function of of the linker (an export) you need to specify the arguments and if is more than one then you need to use tuples, BUT if you use only one argument you need to use this SUPER weird syntax (A,)
+
+#+begin_src rust
+let fn_typed = instance.get_typed_func::<(u32,), ()>("add_n").unwrap();
+// even then you call the function
+fn_typed.call(&mut storage, (2,)).unwrap();
+#+end_src
+
+Solution -> add another branch in the impl_into_extern_fn! macro and just implement FuncArgs for A0 and not (A0,)

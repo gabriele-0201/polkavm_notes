@@ -36,8 +36,12 @@ And finally:
   + regs_are_64bit
 currently it is all 32 bit BUT MHHH not sure about the difference....
 
-** Where is specified the C extension for the compilation of the guest program? polkatool link does this?
+** Where is specified the C extension (Compressed Instruction) for the compilation of the guest program? polkatool link does this?
 
 ** Inside the trampolines to export function
 
 Why before calling the export function the state of the registers are restored from the virtual context?
+
+** WHERE the fuck are the generate_import/export_assembly??
+
+After cargo expand the code is NOT visible

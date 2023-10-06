@@ -1,0 +1,17 @@
+
+* polkavm_import macro should support ! as return type
+https://github.com/koute/polkavm/issues/47
+
+should be pretty easy, just a matter of adding a new supported return type
+
+* interagate into substrate
+https://github.com/koute/polkavm/issues/20
+
+Pretty BIG amount of work but I think I doable in A LOT OF TIME
+
+* Add basic gas metering
+https://github.com/koute/polkavm/issues/16
+
+if gas metering is something like FUEL then maybe instruction could be injected
+
+or is possible "look" into the VmCtx from the Host to see how maybe things the Guest has been done

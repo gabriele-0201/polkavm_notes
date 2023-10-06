@@ -1,0 +1,53 @@
+
+* Polkatool
+
+** main_link
+
+1. Init Config (with or without `strip` (TODO: what is strip?))
+2. read the input
+3. call `polkavm_linker::program_from_elf`
+4. write into the output file the previous result
+
+** main_disassemble
+(TODO)
+
+* polkavm_linker
+
+** Config
+for now just a wrapper over a `strip` field (boolean value)
+
+** struct ELF
+
+#+begin_src rust
+
+type ElfFile<'a> = object::read::elf::ElfFile<'a, object::elf::FileHeader32<object::endian::LittleEndian>, &'a [u8]>;
+
+pub struct Elf<'data> {
+    // Vector of all the Section present in the elf file
+    sections: Vec<Section<'data>>,
+    // name of section to section
+    section_index_by_name: HashMap<String, SectionIndex>,
+    // index of the section in the elf file to local index section
+    section_index_map: HashMap<ElfSectionIndex, SectionIndex>,
+    raw_elf: ElfFile<'data>,
+}
+#+end_src
+
+*** parse
+1. `let elf = ElfFile::parse(data)?;` -> parse the raw elf file using the crate "object"
+2. require the elf file to be object::elf::ELFDATA2LSB (= 2's complement, little endian)
+3. require the elf file to use ELFOSABI_SYSV (= UNIX System V ABI)
+4. require the type of the file to be ET_EXEC (= executable) or ET_REL (= relocatable file)
+5. require the code to be RISC-V
+6. iterate over the sections of the elf file
+   1. varius check on the size and fill the two maps
+
+
+
+
+** program_from_elf
+
+1. Parse ELF file
+2. Add if not present '.got' section (this section should contain all the global variables)
+3. iterate over all the sections (Local format of section)
+   1. checks + reorder of things in the section
