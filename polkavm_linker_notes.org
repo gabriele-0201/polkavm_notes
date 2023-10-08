@@ -51,3 +51,9 @@ pub struct Elf<'data> {
 2. Add if not present '.got' section (this section should contain all the global variables)
 3. iterate over all the sections (Local format of section)
    1. checks + reorder of things in the section
+
+** How Jump Targets are assigned?
+
+HOPEFULLY this is done into the function `polkavm_linker::program_from_elf::harvest_all_jump_targets`
+
+WHY is present another Instuction abstraction in the linker !?!?!!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?!?, oh god... maybe the linker is implementing the "C" extension? LOL -> there is a custom serialization and deserialization scheme, the one implemented in `polkavm-common/src/program.rs` ` RawInstrunction::serialize`

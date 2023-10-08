@@ -9,8 +9,8 @@ pub struct ProgramBlob<'a> {
     bss_size: u32,
     stack_size: u32,
 
-    ro_data: Range<usize>,
-    rw_data: Range<usize>,
+    ro_data: Range<usize>, // read only data (usually constants)
+    rw_data: Range<usize>, // read write data (usually variables)
     exports: Range<usize>,
     imports: Range<usize>,
     code: Range<usize>,
@@ -395,7 +395,7 @@ Creates a new module from a deserialized program `blob`
    1. define `default_backend`, compiler backend seems to be always supported for now (there is a const = true)
    2. the selected backend is the one specified in the Engine, if not the fallback is the `default_backend`
    3. Two Module are create
-      1. `CompiledModule` -> if compiler_backend is selected (TODO)
+      1. `CompiledModule` -> if compiler_backend is selected
       2. `InterpretedModule` -> if compiler_backend is selected OR trace_execution is enabled (TODO)
 8. creation of `export_index_by_name`
 9. exports and import are 're-collected', I think to change the lifetimes
@@ -415,11 +415,14 @@ pub struct CompiledModule {
 *** new
 
 1. `Compiler::new(instructions, exports, debug_trace_execution)`, init the compiler
-2. `let result = program_assembler.finalize()?;`, finalize the compilation
-3. TODO
-
+2. `let result = program_assembler.finalize()?;`, finalize the compilation on the `Compiler` object
+3. The SandboxProgramInit is initialized with the result of the program_assembler initialization
+4. `let sandbox_program = SandboxProgram::new(init).map_err(Error::from_display)?;`
+5. extract the trampolines from the result
+6. construct the return value, made by the sandbox_program and the export_trampolines
 
 ** Compiler
+
 
 #+begin_src rust
 struct Compiler<'a> {
@@ -430,9 +433,15 @@ struct Compiler<'a> {
     exports: &'a [ProgramExport<'a>],
     // List of all the risc-v quest instruciton
     instructions: &'a [RawInstruction],
-    // TODO
+    // PC is NOT program counter -> it is the code added in the bytecode by the linker to handle
+    // jump even after the transformation by polkavm-linker
+    //
+    // Initially the code has real address that are then translated by the linker
+    // into something else (specified by the jump target instruction) and those are
+    // converted into Label address in the final native code
     pc_to_label: HashMap<u32, Label>,
-    // TODO
+    // PENDING maybe because the label is not defined yet but for sure there is
+    // a jump to a new piece of code (represented as a label) that was not covered yet
     pc_to_label_pending: HashMap<u32, Label>,
     // name self explanatory, idk where is used
     next_instruction: Option<RawInstruction>,
@@ -502,7 +511,7 @@ struct CompilationResult<'a> {
    2. get the current length of the code -> `initial_length = self.asm.len()`
    3. fetch the current_instruction from the `instrucitons` array
    4. if trace_execution is enabled and the current_instruction is NOT an Opcode::jump_target
-      1. `self.trace_execution(nth_instruction);` -> (TODO: MMHH I WILL EVER ARRIVE TO THAT POINT?)
+      1. `self.trace_execution(nth_instruction);` -> (TODO)
    5. `instruction.visit(self).map_err(Error::from_static_str)?;`
       1. self=Compiler -> `Compiler` implements `InstructionVisitor`, this means that for each instruction is possible to implement custom logic accepting the `Compiler` as arguments, what is done in the custom logic?
 
@@ -521,17 +530,27 @@ struct CompilationResult<'a> {
    3. emit_ecall_trampoline
    4. emit_export_trampolines
    5. emit_sysreturn
-6. make sure that the field `Compiler.pc_to_label_pending` is empty (TODO: what this field is used for?)
+6. make sure that the field `Compiler.pc_to_label_pending` is empty, every label MUST be specified in the Assembler
+   This check is present because in the emit trampolines functions the `get_or_forward_declare_label` function could forward declare a label
 7. fetch the native pointer size with `core::mem::size_of::<usize>()`
-8. resize the jump_table: `self.jump_table.resize((self.max_jump_target as usize + 1) * native_pointer_size, 0);` (TODO: WHY??)
-9. iterate over `pc_to_label` field
-   the following snipped DOESN'T make any sense for now... (TODO)
+8. resize the jump_table: `self.jump_table.resize((self.max_jump_target as usize + 1) * native_pointer_size, 0);`
+
+   the max_jump_target is updated every time a new jump_target is found, and the jump_target are integers that follows the number fo the block in the linker -> this means that the max_jump_target is also the number of jumps target
+
+    so jump_table is and vec<u8> and is just resized to being able to contain all the needed jump_targets
+
+9. iterate over `pc_to_label` field, and
+   the following snipped DOESN'T make any sense for now...
    #+begin_src rust
    for (pc, label) in self.pc_to_label.drain() {
+       // PC is the JUMP_TARGET, it should be some sort of incrementer value based on the block the targe is into
        let pc = pc as usize;
-       let range = pc * native_pointer_size..(pc + 1) * native_pointer_size;
+       // the range is the space in the jump_table the native address needs to be inserted to be associated with the corrent jump_target
+       let range = pc * native_pointer_size..(pc + 1) * native_pointer_size; //
+       // the native address associated with the jump_target (pc)
        let address = VM_ADDR_NATIVE_CODE + self.asm.get_label_offset(label) as u64;
        log::trace!("Jump table: [0x{:x}] = 0x{:x}", VM_ADDR_JUMP_TABLE + range.start as u64, address);
+       // copy in the jump_table the native address
        self.jump_table[range].copy_from_slice(&address.to_ne_bytes());
    }
     #+end_src
@@ -548,6 +567,12 @@ struct CompilationResult<'a> {
         self.export_trampolines.push(native_address);
     }
     #+end_src
+
+11. `let epilogue_length = self.asm.len() - epilogue_start;`, where the epilogue_start was the length of the code in the Assembler finished visiting each instruction, the epilogue must be less than VM_COMPILER_MAXIMUM_EPILOGUE_LENGTH
+
+12. The code in the Assmbler is finalized: `let code = self.asm.finalize()` (TODO)
+
+13. CompilationResult is returned!
 
 
 *** implementation of InstructionVisitor
@@ -630,6 +655,7 @@ fn get_or_forward_declare_label(&mut self, pc: u32) -> Label {
 }
 #+end_src
 
+
 ** VmCtx
 
 The virtual machine context.
@@ -662,7 +688,6 @@ Link exports value of the module to registered host functions in the Linker
 Return type: InstancePre
 
 **** How it works? (TODO)
-
 
 
 ** InstancePre

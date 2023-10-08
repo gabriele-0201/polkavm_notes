@@ -337,15 +337,15 @@ for export in self.exports {
 
 **** emit_sysreturn
 
-Almost identical to the first three, just the lable wasn't already created and made by `create_label`
+Almost identical to the first two, just the label wasn't already created and made by `create_label`
 
 (TODO: what this does?)
 
 #+begin_src rust
 self.save_registers_to_vmctx();
-self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL));
-self.push(load32_imm(rdi, SYSCALL_RETURN));
-self.push(jmp_reg(TMP_REG));
+self.push(load64_imm(TMP_REG, VM_ADDR_SYSCALL)); // in the TMP_REG = rcx is pushed the address used for triggering syscalls
+self.push(load32_imm(rdi, SYSCALL_RETURN)); // in rdi is stored the 'kind' of syscall
+self.push(jmp_reg(TMP_REG)); // jump tp the address in TMP_REG
 #+end_src
 
 

@@ -106,3 +106,36 @@ fn_typed.call(&mut storage, (2,)).unwrap();
 #+end_src
 
 Solution -> add another branch in the impl_into_extern_fn! macro and just implement FuncArgs for A0 and not (A0,)
+
+** polkavm/crates/polkavm/src/compiler/amd64.rs
+
+In the function `emit_export_trampolines` there is an usage of `get_or_forward_declare_label` that could create a pending label, BUT the function `emit_export_trampoline` is called ONLY in Compiler::finalize and AFTER an iteration over ALL the instructions -> this means that the following check:
+
+#+begin_src rust
+if !self.pc_to_label_pending.is_empty() {
+    for pc in self.pc_to_label_pending.keys() {
+        log::debug!("Missing jump target: @{:x}", pc * 4);
+    }
+
+    bail!("program is missing {} jump target(s)", self.pc_to_label_pending.len());
+}
+#+end_src
+
+is confusing, because all the pending_label are created only in the `emit_export_trampolines` and there are no chance that other label will be added between the function call and the above check
+
+SO -> why don't let bail the function `emit_export_trampolines` because the error happens here but is checked later
+
+Don't you can just return error in `emit_export_trampolines` if the label you expect from the address is not present in pc_to_label field of the compiler?
+
+** polkavm_linux_raw/lib.rs
+
+line 566
+
+#+begin_src rust
+// this could be replaced
+let _ = [(); 0 - (!(STR_VALID) as usize)];
+// by this, a little bit more clear
+// not sure if there is the possibility that this is NOT
+// done at compile time
+const _ :() = assert!(STR_VALID);
+#+end_src
