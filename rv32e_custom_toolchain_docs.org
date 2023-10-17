@@ -1,5 +1,6 @@
 * rv32e custom toolchain cration OLD
 
+
 I found https://github.com/koute/rustc-rv32e
 
 ** clone rust repository
@@ -64,3 +65,24 @@ python3 x.py build
 #+begin_src shell
 rustup toolchain link rv32e ~/rust/build/host/stage1
 #+end_src
+
+* rv32e custom toolchain
+
+** Clone
+
+#+begin_src shell
+git clone "https://github.com/rust-lang/rust.git"
+cd rust
+#
+git checkout 8d321f7a88f0ae27793c133390e507bf1f49125a
+# Clone all the sub-repos (like llvm-project)
+git submodule update --init --recursive
+#+end_src
+
+**
+
+* maybe useful things:
+
++ rust uses its own llvm branch based on released llvm branch
+
+* How github actions works?

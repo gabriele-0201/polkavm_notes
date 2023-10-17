@@ -662,6 +662,7 @@ The virtual machine context.
 
 This is mapped in shared memory and used by the sandbox to keep its state in, as well as by the host to communicate with the sandbox.
 
+
 ** Linker
 
 #+BEGIN_SRC rust
@@ -676,19 +677,199 @@ pub struct Linker<T> {
 T = seems could be a shared state that can be used in the different host functions
 
 *** new(_engine: &Engine)
-default values are used, engine is NOT used and T = ()
+default values are used, engine is NOT used and T is wrapped into PhantomData and specified alter
 
 *** func_wrap<Params, Args>(&mut self, name: &str, func: impl IntoExternFn<T, Params, Args>)
 
-a way to register host functions
+a way to register statically typed host functions
+
+As we can see the functions must implement `IntoExternFn`, and the implementation of this trait are:
+
+#+begin_src rust
+impl_into_extern_fn!(0);
+impl_into_extern_fn!(1 A0);
+impl_into_extern_fn!(2 A0 A1);
+impl_into_extern_fn!(3 A0 A1 A2);
+impl_into_extern_fn!(4 A0 A1 A2 A3);
+impl_into_extern_fn!(5 A0 A1 A2 A3 A4);
+impl_into_extern_fn!(6 A0 A1 A2 A3 A4 A5);
+#+end_src
+
+**** What this macro does?
+
+#+begin_src rust
+// This is the main branch, entry point of the above calls
+//
+// Thin branch will later call the @call branches, the main differences are the number of arguments
+($arg_count:tt $($args:ident)*) => { ... }
+
+// exampls of @call
+(@call $caller:expr, $callback:expr, $a0:ident) => { ... }
+(@call $caller:expr, $callback:expr, $a0:ident, $a1:ident) => { ... }
+// ...
+
+// Each @call branch will call @check_reg_count and @get_reg
+(@check_reg_count $regs_required:expr) => { ... }
+(@get_reg $caller:expr) => { ... }
+#+end_src
+
+
+the entry point implements ExternFn for a tuple `(F, PhantomData<(R, $($args),*)>)`
+where F is the function that needs to be registered as host function
+
+this means that everything explained here will be repeated by the macro calls with different number arguments
+
+***** Implementation of `ExternFn`
+
+Inside the trait `ExternFn` is implemented the function `call`
+#+begin_src rust
+
+// this method is used when it's time to effectively call the host function (I think)
+fn call(&self, user_data: &mut T, mut access: BackendAccess, raw: &mut CallerRaw) -> Result<(), Trap> {
+    #[allow(unused_mut)]
+    // wrap method explained in the section below
+    let result = Caller::wrap(user_data, &mut access, raw, move |mut caller| {
+        // different branch of the macro
+        // impl_into_extern_fn!(@call caller, self.0, $($args),*)
+
+        // example with only one argument
+        // impl_into_extern_fn!(@check_reg_count $a0::_REGS_REQUIRED);
+        // _REGS_REQUIRED is a method implemented in the trait AbiTy,
+        // which is required to be implemented by each argument used in the provided closure
+        if $regs_required > Reg::ARG_REGS.len() {
+            log::error!("External call failed: too many registers required for arguments!");
+            return Err(Trap::default());
+        }
+
+        // SCRIVO IN ITALIANO PERCHE" SONO STANCO, E' TARDI:
+        //
+        // quello che fa la macro @call con all'inerno la macro @get_reg
+        // e' quello di andare a chiamare la host function fornita ma andando a pigliare
+        // i paramentri di input dai registri del VmCtx
+        // questo viene fatto attraverso una closure ritornata da @get_reg
+        // che poi viene utilizzta piu' volte al variare dei paramentri richiesti dall funzione
+        // attraverso `let a0 = $a0::_get(cb);` che scannerizzera' un registro dopo l'altro
+
+        // TODO: the following part doesn't make sense, LOL
+        //let cb = impl_into_extern_fn!(@get_reg $caller);
+        let cb = { let mut reg_index = 0;
+        let caller = &mut $caller;
+        move || -> u32 {
+            let value = caller.get_reg(Reg::ARG_REGS[reg_index]);
+            reg_index += 1;
+            value
+        }};
+
+        let a0 = $a0::_get(cb);
+        catch_hostcall_panic(|| ($callback)($caller, a0))
+    })?;
+
+    let set_reg = {
+        let mut reg_index = 0;
+        move |value: u32| {
+            let reg = Reg::ARG_REGS[reg_index];
+            access.set_reg(reg, value);
+
+            if let Some(ref mut tracer) = raw.tracer() {
+                tracer.on_set_reg_in_hostcall(reg, value as u32);
+            }
+
+            reg_index += 1;
+        }
+    };
+    result._handle_return(set_reg)
+}
+#+end_src
+
+***** Implementation of `IntoExternFn`
+
+it is implemented TWICE
++ `IntoExternFn<T, ($($args,)*), R>`
++ `IntoExternFn<T, (Caller<'_, T>, $($args,)*), R>`
+
+one with and one without caller
+
+the required method by the trait is `_into_extern_fn`, used in the Linker
+the return type is `ExternFnArc` and it is just a wrapper over the callback and some PhantomData
+
+*****  Implementation of `FuncArgs`
+
+#+begin_src rust
+impl<$($args: Send + AbiTy,)*> FuncArgs for ($($args,)*) {
+    const _PRIVATE_EXTERN_TY: &'static [ExternTy] = &[ //
+        $(<$args as AbiTy>::_PRIVATE_EXTERN_TY,)*      // --> WHAT IS THAT?
+    ];                                                 //
+
+    // TODO: BOH
+    #[allow(unused_mut)]
+    #[allow(unused_variables)]
+    #[allow(non_snake_case)]
+    fn _set(self, mut set_reg: impl FnMut(u32)) {
+        let ($($args,)*) = self;
+        $($args._set(&mut set_reg);)*
+    }
+}
+#+end_src
+
+
+
+*** func_new(&mut self, name: &str, ty: FuncType, func: impl Fn(Caller<'_, T>, &[Val], Option<&mut Val>) -> Result<(), Trap> + Send + Sync + 'static,)
+
+a way to register dynamically typed host functions
+
 
 *** instantiate_pre(&self, module: &Module)
+
 Link exports value of the module to registered host functions in the Linker
 
 Return type: InstancePre
 
 **** How it works? (TODO)
 
+
+** Caller
+
+#+begin_src rust
+/// A handle used to access the execution context.
+pub struct Caller<'a, T> {
+    raw: &'a mut CallerRaw,
+    lifetime: *mut Option<Rc<()>>,
+    _phantom: core::marker::PhantomData<&'a mut T>,
+}
+#+end_src
+
+*** wrap
+
+this method accept everythin needed to construct a Caller and a callback function, the callback is the provided host function, callable from the inside of the risc-v blob as import
+
+What the method does is a little bit weird:
+
+#+begin_src rust
+pub(crate) fn wrap<R>(
+    user_data: &mut T,
+    access: &'a mut BackendAccess<'_>,
+    raw: &'a mut CallerRaw,
+    callback: impl FnOnce(Self) -> R,
+) -> R
+where
+    T: 'a,
+{
+    raw.user_data = user_data as *mut T as *mut core::ffi::c_void;
+    raw.access = access as *mut BackendAccess as *mut core::ffi::c_void;
+
+    let mut lifetime = None;
+    let caller = Caller {
+        raw,
+        lifetime: &mut lifetime,
+        _phantom: core::marker::PhantomData,
+    };
+
+    let result = callback(caller);
+
+    core::mem::drop(lifetime);
+    result
+}
+#+end_src
 
 ** InstancePre
 #+BEGIN_SRC rust
