@@ -796,11 +796,13 @@ the return type is `ExternFnArc` and it is just a wrapper over the callback and 
 
 #+begin_src rust
 impl<$($args: Send + AbiTy,)*> FuncArgs for ($($args,)*) {
-    const _PRIVATE_EXTERN_TY: &'static [ExternTy] = &[ //
-        $(<$args as AbiTy>::_PRIVATE_EXTERN_TY,)*      // --> WHAT IS THAT?
-    ];                                                 //
+    const _PRIVATE_EXTERN_TY: &'static [ExternTy] = &[ // --> This is used to check at compile time
+        $(<$args as AbiTy>::_PRIVATE_EXTERN_TY,)*      // the arguments passed to the exported function
+    ];                                                 // of the blob
 
-    // TODO: BOH
+    // this function will set the registers of the VmCtx to the arguments
+    // this is used to call an exported function by the blob to set up all the register
+    // and then call the function
     #[allow(unused_mut)]
     #[allow(unused_variables)]
     #[allow(non_snake_case)]
@@ -810,6 +812,9 @@ impl<$($args: Send + AbiTy,)*> FuncArgs for ($($args,)*) {
     }
 }
 #+end_src
+
+#+RESULTS:
+: error: Could not compile `cargoOWG3Z1`.
 
 
 
@@ -822,7 +827,9 @@ a way to register dynamically typed host functions
 
 Link exports value of the module to registered host functions in the Linker
 
-Return type: InstancePre
+There are various check everything is correct between what specified in the import of the blob and what provided to the linker thanks to func_wrap and func_new
+
+return a InstancePre struct,
 
 **** How it works? (TODO)
 
@@ -876,12 +883,14 @@ where
 pub struct InstancePre<T>(Arc<InstancePrePrivate<T>>);
 #+END_SRC
 
-It is just a pre stage of a real instance
+this is something like a wrapper over the Module and the Host Functions
 
 *** instantiate
 the pre instance can be instantiated in two ways Compiled or Interpreted with the Tracing enabled
 
-**** How it works? (TODO)
+1. a backend is instatiated, it could be
+   + InstanceBackend::Compiled(CompiledInstance)
+   + InstanceBackend::Interpreted(InterpretedInstance)
 
 *** get_typed_func<FnArgs, FnResult>(&self, name: &str)
 Returns a **typed** handle to a function of a given name exported by the module.
@@ -889,6 +898,18 @@ Returns a **typed** handle to a function of a given name exported by the module.
 *** get_func(&self, name: &str)
 Returns a handle to a function of a given name exported by the module.
 
+** CompiledInstance
+
+#+begin_src rust
+pub(crate) struct CompiledInstance {
+    module: Module,
+    sandbox: Sandbox,
+}
+#+end_src
+
+*** new(Module) -> CompiledInstance
+
+(TODO)
 
 ** RawInstruction
 
