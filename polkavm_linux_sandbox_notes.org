@@ -90,3 +90,45 @@ fn get_native_page_size() -> usize {
 4. populate the fd using the passed closure
 5. unmap the map
 6. check on the unmap results, there are weird behaviours in multithreading
+
+** Sandbox
+
+#+begin_src rust
+pub struct Sandbox {
+    vmctx_mmap: Mmap,
+    child: ChildProcess,
+    socket: Fd,
+
+    count_wait_loop_start: u64,
+    count_futex_wait: u64,
+}
+#+end_src
+
+*** TODO
+
+** Sigmask
+
+#+begin_src rust
+struct Sigmask {
+    sigset_original: linux_raw::kernel_sigset_t,
+}
+#+end_src
+
+*** block_all_signals
+
+Temporarily blocks all signals from being delivered.
+
+#+begin_src rust
+// kernel_sigset_t = core::ffi::c_ulong (usigned long)
+let sigset_all: linux_raw::kernel_sigset_t = !0;
+let mut sigset_original: linux_raw::kernel_sigset_t = 0;
+unsafe { linux_raw::sys_rt_sigprocmask(linux_raw::SIG_SETMASK, &sigset_all, Some(&mut sigset_original))? };
+
+Ok(Sigmask { sigset_original })
+#+end_src
+
+What `sigprocmask` does?
+
+Each process can receive some signal from the kernel (`SIGTERM` (termination signal), `SIGINT` (interrupt signal), `SIGSEGV` (segmentation fault), `SIGKILL` (kill signal), and `SIGUSR1` (user-defined signal))
+
+And the sigprocmask let you define a mask to BLOCK some signals, preventing them to be delivered to the process

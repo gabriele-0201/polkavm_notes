@@ -878,6 +878,7 @@ where
 }
 #+end_src
 
+
 ** InstancePre
 #+BEGIN_SRC rust
 pub struct InstancePre<T>(Arc<InstancePrePrivate<T>>);
@@ -909,7 +910,13 @@ pub(crate) struct CompiledInstance {
 
 *** new(Module) -> CompiledInstance
 
-(TODO)
+1. get the CompiledModule from the Module
+2. Init SandboxConfig (logger enabled only if is_debug_trace_execution_enabled)
+3. `Sandbox::Spawn`
+4. TODO
+
+** SandboxConfig
+
 
 ** RawInstruction
 
