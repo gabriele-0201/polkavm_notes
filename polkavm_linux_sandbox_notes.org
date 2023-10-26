@@ -104,9 +104,16 @@ pub struct Sandbox {
 }
 #+end_src
 
-*** TODO
+*** Spawn
+1. `Sigmask::block_all_signals()?`
+2. `prepare_zygote()?`
+3. `prepare_vmctx()?`
+4. (TODO) `linux_raw::sys_socketpair(linux_raw::AF_UNIX, linux_raw::SOCK_SEQPACKET, 0)?`
+
 
 ** Sigmask
+
+
 
 #+begin_src rust
 struct Sigmask {
@@ -132,3 +139,19 @@ What `sigprocmask` does?
 Each process can receive some signal from the kernel (`SIGTERM` (termination signal), `SIGINT` (interrupt signal), `SIGSEGV` (segmentation fault), `SIGKILL` (kill signal), and `SIGUSR1` (user-defined signal))
 
 And the sigprocmask let you define a mask to BLOCK some signals, preventing them to be delivered to the process
+
+** prepare_zygote
+
+just load the bytecode of the zygote into a mmap (under a fd) using the function prepare_sealed_memfd
+
+** prepare_vmctx
+1. align the size of the vmctx to a multiple of the native_page_size
+2. create memfd -> using MFD_CLOEXEC | MFD_ALLOW_SEALING flag (TODO: what those flag do?)
+3. ftruncate the memfd to the vmctx size
+4. call to fcntl (syscall that enable you to make various operation to the file)
+   F_ADD_SEALS spcifie that new seals will be added, a seal is a restriction placed on an open file
+   + F_SEAL_SEAL -> Prevent adding more seals
+   + F_SEAL_SHRINK  -> prevent the file size reduction
+   + F_SEAL_GROW -> prevent the file size growth
+5. Create a Mmap object, it is just an abstraction over a memory mapped fd (the constructor just calls sys_mmap)
+6. cast the mmap object and save into a new VmCtx object
