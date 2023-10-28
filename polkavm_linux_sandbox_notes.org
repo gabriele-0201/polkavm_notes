@@ -108,12 +108,51 @@ pub struct Sandbox {
 1. `Sigmask::block_all_signals()?`
 2. `prepare_zygote()?`
 3. `prepare_vmctx()?`
-4. (TODO) `linux_raw::sys_socketpair(linux_raw::AF_UNIX, linux_raw::SOCK_SEQPACKET, 0)?`
+4. `let (socket, child_socket) = linux_raw::sys_socketpair(linux_raw::AF_UNIX, linux_raw::SOCK_SEQPACKET, 0)?`
+   This syscall create a pair con CONNECTED socket (typically used for inter process communication)
+
+   AF_UNIX => address family, the UNIX domain socket will be used
+   SOCK_SEQPACKET => using `SOCK_SEQPACKET` sockets, you can send and receive complete packets (messages) of data, rather than dealing with a stream of data. provides a reliable and sequenced data transmission mechanism (data sent from one end will be received in the same order at the other end)
+5. Setup sandbox_flags what will be used in the creation of the new process (the sandbox), using the **clonse** syscall, flags are:
+   - CLONE_NEWCGROUP :: Creates a new control group namespace.
+   - CLONE_NEWIPC :: Creates a new Inter-Process Communication (IPC) namespace.
+   - CLONE_NEWNET :: Creates a new network namespace.
+   - CLONE_NEWNS :: Creates a new mount namespace.
+   - CLONE_NEWPID :: Creates a new PID namespace.
+   - CLONE_NEWUSER :: Creates a new user namespace.
+   - CLONE_NEWUTS :: Creates a new Unix Timesharing System (UTS) namespace.
+   - CLONE_CLEAR_SIGHAND :: Clears the signal handlers in the child process.
+   - CLONE_PIDFD :: Creates a file descriptor for the child's PID.
+
+     There's NO CLONE_VM flags, this meant that there's NO shared virtual memory -> it can be descrbed as a project
+
+     A namespace is a feature that provides process isolation by creating separate instances of global system resources for different processes. Each process can have its own unique view of certain resources, making it appear as if it is running in its own isolated environment
+6. Setup the struct CloneArgs
+7. Fetch the UserID and GroupID (UID and GID)
+8. if logger enable then use `sys_pipe2` to create a connection to debug the code (TODO: is this correct?)
+9. call `clone` -> get the child process id
+
+   Now there is a split
+    pid == 0 => child
+
+    // NOT sure about this, maybe it is a way to FORGET
+    // TODO WHY?
+    core::mem::forget(sigset);
+
+    call to child_main function
+    
+    pid != 0 => parent
+
+10. SET UP SOME LOGGING STUFF IF ENABLED (TODO)
+11. Construct ChildProcess struct
+12. Close child_socket and unblock sigset
+13. Prepare the VMCTX (TODO ...)
+14.
+
+
 
 
 ** Sigmask
-
-
 
 #+begin_src rust
 struct Sigmask {
@@ -145,6 +184,8 @@ And the sigprocmask let you define a mask to BLOCK some signals, preventing them
 just load the bytecode of the zygote into a mmap (under a fd) using the function prepare_sealed_memfd
 
 ** prepare_vmctx
+
+
 1. align the size of the vmctx to a multiple of the native_page_size
 2. create memfd -> using MFD_CLOEXEC | MFD_ALLOW_SEALING flag (TODO: what those flag do?)
 3. ftruncate the memfd to the vmctx size
@@ -155,3 +196,49 @@ just load the bytecode of the zygote into a mmap (under a fd) using the function
    + F_SEAL_GROW -> prevent the file size growth
 5. Create a Mmap object, it is just an abstraction over a memory mapped fd (the constructor just calls sys_mmap)
 6. cast the mmap object and save into a new VmCtx object
+
+** CloneArgs
+
+#+begin_src rust
+struct CloneArgs {
+    /// Flags.
+    flags: u64,
+    /// Where to store PID file descriptor. (int *)
+    pidfd: *mut c_int,
+    /// Where to store child TID in child's memory. (pid_t *)
+    child_tid: u64,
+    /// Where to store child TID in parent's memory. (pid_t *)
+    parent_tid: u64,
+    /// Signal to deliver to parent on child termination.
+    exit_signal: u64,
+    /// Pointer to lowest byte of stack.
+    stack: u64,
+    /// Size of the stack.
+    stack_size: u64,
+    /// Location of the new TLS.
+    tls: u64,
+}
+#+end_src
+** Clone Syscall
+
+Every process under Linux is dynamically allocated a struct task_struct structure
+
+A process is a task that does not share virtual memory with its parent, whereas a thread is a task that shares virtual memory with its parent. It depends on which flags are passed to the clone syscall
+** child_main
+
+WWOOAAAHHH
+
+(TODO: UNDESTAND EVERYTHIN)
+
+stuff on groups, file descriptor and stuff
+
+hide host filesystem
+Clear all ambient capabilities.
+Flag ourselves that we won't ever want to acquire any new privileges
+Set resource limits (Virtual memory(?), stack and other thigs)
+
+(TODO: WHAT?)
+// Finally, drop all capabilities.
+linux_raw::sys_capset_drop_all()?;
+
+use sys_execveat to execute the zygote (throught the filedescriptor)
